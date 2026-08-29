@@ -3,7 +3,7 @@ import { statSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import type { DayRange } from '../types/day'
 import type { Instant } from '../types/instant'
-import type { RawSession, SessionEvent } from '../types/session'
+import type { RawSession, SessionEvent, TokenEvent } from '../types/session'
 import { firstTimestamp, plausible, readLines } from './jsonl'
 import type { Candidate, SessionAdapter } from './types'
 
@@ -15,6 +15,44 @@ const RE_CWD = /"cwd":\s*"([^"]*)"/
 const RE_BRANCH = /"gitBranch":\s*"([^"]*)"/
 const RE_SESSION_ID = /"sessionId":\s*"([^"]*)"/
 const RE_AI_TITLE_LINE = /"type":\s*"ai-title"/
+const RE_USAGE = /"usage"\s*:/
+
+interface CCUsage {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+  output_tokens_details?: { thinking_tokens?: number }
+}
+
+const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+
+/**
+ * 同一条 assistant 消息会被重复落盘（实测 145 条 usage 只有 86 个不同 message.id）。
+ * 不按 message.id 去重会让 token 虚高约 65%。无 id 的行退回按行计入。
+ */
+export function parseUsageLine(line: string, at: Instant, seen: Set<string>): TokenEvent | null {
+  if (!RE_USAGE.test(line)) return null
+  let rec: { message?: { id?: string; usage?: CCUsage } }
+  try { rec = JSON.parse(line) } catch { return null }
+  const u = rec.message?.usage
+  if (!u) return null
+  const id = rec.message?.id
+  if (typeof id === 'string') {
+    if (seen.has(id)) return null
+    seen.add(id)
+  }
+  return {
+    at,
+    usage: {
+      input: n(u.input_tokens),
+      output: n(u.output_tokens),
+      cacheWrite: n(u.cache_creation_input_tokens),
+      cacheRead: n(u.cache_read_input_tokens),
+      reasoning: n(u.output_tokens_details?.thinking_tokens),
+    },
+  }
+}
 
 /**
  * 真人输入判别。tool_result 与 subagent 记录都以 type:"user" 落盘，
@@ -55,6 +93,8 @@ export const claudeCode: SessionAdapter = {
     let branch: string | null = null
     let sessionId: string | null = null
     let title: string | null = null
+    const tokenEvents: TokenEvent[] = []
+    const seenMessageIds = new Set<string>()
 
     for await (const line of readLines(c.file)) {
       if (title === null && RE_AI_TITLE_LINE.test(line)) {
@@ -70,6 +110,8 @@ export const claudeCode: SessionAdapter = {
       const at: Instant | null = firstTimestamp(line)
       if (at !== null && plausible(at, c.mtimeMs)) {
         events.push({ at, kind: isHumanLine(line) ? 'human' : 'agent' })
+        const usage = parseUsageLine(line, at, seenMessageIds)
+        if (usage) tokenEvents.push(usage)
       }
     }
 
@@ -84,6 +126,7 @@ export const claudeCode: SessionAdapter = {
       cwd,
       git: branch === null ? null : { branch, commitHash: null, remoteUrl: null },
       title,
+      tokenEvents,
       isSidechain,
       // subagent 文件的父目录名即父 session uuid
       parentSessionId: isSidechain ? basename(dirname(dirname(c.file))) : null,

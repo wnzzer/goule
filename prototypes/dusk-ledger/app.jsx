@@ -1,26 +1,17 @@
 const { useEffect, useMemo, useState } = React;
 const { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakColor } = window;
 
-const DATA = {
-  day: "2026-08-28",
-  boundary: { start: 1787860800000, end: 1787947200000 },
-  sessionCount: 19,
-  baseline: { p90: 281.73099, days: 30 },
-  handBlocks: [[1787882712162,1787883222762],[1787883717800,1787884219482],[1787884546072,1787884606072],[1787885415820,1787885629549],[1787885645112,1787885645161],[1787885679454,1787888398140],[1787888562133,1787888781527],[1787890128408,1787890718109],[1787891341803,1787891401803],[1787894318760,1787894378760],[1787896714498,1787896774498],[1787897092157,1787897152157],[1787897953010,1787898288878],[1787898507601,1787898507836],[1787898565701,1787898565837],[1787898603079,1787898603201],[1787899289372,1787899699269],[1787900275120,1787900335120],[1787901682153,1787902979523],[1787904406536,1787904466536],[1787905093238,1787905153238],[1787906148836,1787907210514],[1787907840888,1787908814536]],
-  agentBlocks: [[1787882705747,1787883290311],[1787883717800,1787884605017],[1787885414771,1787885659084],[1787885679453,1787885698447],[1787885724341,1787885726549],[1787885777278,1787888505579],[1787888561766,1787898382336],[1787898507514,1787898530366],[1787898564659,1787898585750],[1787898602014,1787898624449],[1787899289333,1787899719324],[1787900117674,1787900117675],[1787900244211,1787900936096],[1787901682152,1787903126123],[1787904406536,1787904443490],[1787905093237,1787905174778],[1787906148835,1787908825867],[1787922212407,1787922272407]],
-  groups: [
-    { cwd: "/Users/you/work/acme-api", branch: "master", minutes: 157.32816666666668, sessions: 11, tools: ["claude-code", "codex"], titles: ["接口 diff 复核", "分支重建与档位新增", "技术方案分析"] },
-    { cwd: "/Users/you", branch: null, minutes: 6.56355, sessions: 6, tools: ["codex"], titles: [] },
-    { cwd: "/Users/you", branch: "HEAD", minutes: 2, sessions: 2, tools: ["claude-code"], titles: [] }
-  ],
-  signals: [
-    { name: "距上次活动", value: "9h 05m", threshold: "8h" },
-    { name: "连续活跃", value: "5d", threshold: "6d" },
-    { name: "最长连续块", value: "45m", threshold: "120m" },
-    { name: "夜间活动", value: "0m", threshold: "0m" },
-    { name: "周末活动", value: "0m", threshold: "0m" }
-  ]
-};
+// fixture.js 由 scripts/make-prototype-fixture.ts 从真实 scanDay 输出生成。
+// 它含真实 session / commit 标题，因此不入库——克隆下来先自己跑一次生成。
+const D = window.GOULE_DATA;
+if (!D) {
+  document.getElementById("root").innerHTML =
+    '<div class="boot-hint"><h1>缺少 fixture.js</h1>'
+    + '<p>这个原型跑在你自己机器的真实 scanDay 数据上。fixture 含真实标题，不入库。</p>'
+    + '<code>bun run scripts/make-prototype-fixture.ts 2026-08-28</code>'
+    + '<p class="dim">在仓库根目录执行，然后刷新本页。</p></div>';
+  throw new Error("missing fixture.js");
+}
 
 // ── 区间运算：图上画什么，数字就是什么 ──────────────────────────────
 const MIN = 60000;
@@ -60,21 +51,22 @@ const intersect = (a, b) => {
 };
 const total = list => list.reduce((sum, [s, e]) => sum + e - s, 0);
 
-const HAND = union(DATA.handBlocks);
-const AGENT_ALL = union(DATA.agentBlocks);
+const HAND = union(D.handBlocks);
+const AGENT_ALL = union(D.agentBlocks);
 const AGENT_ONLY = subtract(AGENT_ALL, HAND);
 const OVERLAP = intersect(AGENT_ALL, HAND);
 
 const HAND_MS = total(HAND);
 const AGENT_ONLY_MS = total(AGENT_ONLY);
 const OVERLAP_MS = total(OVERLAP);
-const P90_MS = DATA.baseline.p90 * MIN;
+const P90_MS = D.baseline.handsOnP90 * MIN;
+const COMMITS = D.git.commits;
 
 // 轴裁到真正有活动的区间，避免整条时间轴三分之二是空的
 const AXIS = (() => {
-  const all = [...HAND, ...AGENT_ALL];
-  const lo = Math.min(...all.map(x => x[0]));
-  const hi = Math.max(...all.map(x => x[1]));
+  const marks = [...HAND, ...AGENT_ALL, ...COMMITS.map(c => [c.at, c.at])];
+  const lo = Math.min(...marks.map(x => x[0]));
+  const hi = Math.max(...marks.map(x => x[1]));
   return { start: Math.floor(lo / HOUR) * HOUR, end: Math.ceil(hi / HOUR) * HOUR };
 })();
 
@@ -87,6 +79,13 @@ function fmtDur(ms) {
 }
 const timeFmt = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 const fmtTime = ms => timeFmt.format(new Date(ms));
+const fmtInt = n => n.toLocaleString("zh-CN");
+/** 大数用紧凑写法，精确值放 title，避免一行里出现 117,299,274 这种读不动的串 */
+function fmtCompact(n) {
+  if (n < 10000) return fmtInt(n);
+  if (n < 1e6) return `${(n / 1000).toFixed(n < 1e5 ? 1 : 0)}K`;
+  return `${(n / 1e6).toFixed(1)}M`;
+}
 
 function Icon({ name }) {
   const paths = {
@@ -100,7 +99,7 @@ function Icon({ name }) {
 
 // ── 收工刻度 ────────────────────────────────────────────────────────
 function Timeline({ emphasis }) {
-  const [visible, setVisible] = useState({ hand: true, agent: true });
+  const [visible, setVisible] = useState({ hand: true, agent: true, commit: true });
   const [hover, setHover] = useState(null);
   const span = AXIS.end - AXIS.start;
   const pos = ms => ((ms - AXIS.start) / span) * 100;
@@ -115,7 +114,7 @@ function Timeline({ emphasis }) {
     return <div key={`${cls}-${i}`}
       className={`seg ${cls} ${short ? "short" : ""} ${dim(layer) ? "dim" : ""}`}
       style={{ left: `${pos(s)}%`, width: short ? undefined : `${pos(e) - pos(s)}%` }}
-      onMouseEnter={() => setHover({ x: pos((s + e) / 2), row: cls, label: `${name} · ${fmtTime(s)}–${fmtTime(e)} · ${readable}` })}
+      onMouseEnter={() => setHover({ x: pos((s + e) / 2), label: `${name} · ${fmtTime(s)}–${fmtTime(e)} · ${readable}` })}
       onMouseLeave={() => setHover(null)}
       aria-label={`${name} ${fmtTime(s)} 到 ${fmtTime(e)}`} />;
   });
@@ -130,6 +129,7 @@ function Timeline({ emphasis }) {
         <button className={visible.hand ? "" : "off"} onClick={() => setVisible(v => ({ ...v, hand: !v.hand }))}><i className="key hand"/>动手</button>
         <button className={visible.agent ? "" : "off"} onClick={() => setVisible(v => ({ ...v, agent: !v.agent }))}><i className="key agent"/>Agent 独占</button>
         <span className="legend-static"><i className="key overlap"/>与动手重叠</span>
+        <button className={visible.commit ? "" : "off"} onClick={() => setVisible(v => ({ ...v, commit: !v.commit }))}><i className="key commit"/>提交</button>
       </div>
     </div>
 
@@ -152,139 +152,292 @@ function Timeline({ emphasis }) {
           <span className="lane-total">{fmtDur(AGENT_ONLY_MS)}</span>
         </div>
 
-        <div className="lane lane-off">
-          <span className="lane-label">提交</span>
-          <div className="lane-track"><span className="lane-empty">未接入 Git 提交 · Phase 1 数据源未启用</span></div>
-          <span className="lane-total">—</span>
+        <div className={`lane ${COMMITS.length ? "" : "lane-off"}`}>
+          <span className="lane-label commit">提交</span>
+          <div className="lane-track">
+            {COMMITS.length === 0 && <span className="lane-empty">当日无提交</span>}
+            {visible.commit && COMMITS.map(c =>
+              <i key={c.hash} className="commit-mark" style={{ left: `${pos(c.at)}%` }}
+                onMouseEnter={() => setHover({ x: pos(c.at), label: `${fmtTime(c.at)} · ${c.hash} · ${c.subject}` })}
+                onMouseLeave={() => setHover(null)}
+                aria-label={`提交 ${c.hash} ${c.subject}`} />)}
+          </div>
+          <span className="lane-total">{COMMITS.length || "—"}</span>
         </div>
 
         <div className="axis">
           {ticks.map((t, i) => <span key={`t${i}`} className="tick" style={{ left: `${pos(t)}%` }}>{fmtTime(t)}</span>)}
         </div>
 
-        {hover && <div className={`time-tooltip row-${hover.row}`} style={{ left: `${hover.x}%` }}>{hover.label}</div>}
+        {hover && <div className="time-tooltip" style={{ left: `${hover.x}%` }}>{hover.label}</div>}
       </div>
 
       <p className="timeline-caption">
         实心 = 你的输入证据，条纹 = Agent 在你动手期间同时运行（<strong>不计入 Agent 独占</strong>，共 {fmtDur(OVERLAP_MS)}）。
-        短于 2 分钟的活动以细线标记，不放大成块。轴已裁到有活动的区间。
+        菱形是 commit 落点，按 author date 定位。短于 2 分钟的活动以细线标记，不放大成块。
       </p>
     </div>
   </section>;
 }
 
-// ── 证据簿 ──────────────────────────────────────────────────────────
-function LedgerRow({ group, index, share, open, onToggle }) {
-  const cut = group.cwd.lastIndexOf("/");
-  const parent = group.cwd.slice(0, cut + 1);
-  const leaf = group.cwd.slice(cut + 1) || group.cwd;
-  return <div className={`ledger-row ${open ? "open" : ""}`}>
-    <button className="ledger-summary" onClick={onToggle} aria-expanded={open}>
-      <span className="project-index">{String(index).padStart(2, "0")}</span>
-      <span className="project-main">
-        <span className="project-name"><span className="path-dim">{parent}</span>{leaf}</span>
-        <span className="project-meta">
-          <span>{group.branch || "未识别分支"}</span>
-          <span>{group.tools.join(" + ")}</span>
-          <span>{group.sessions} sessions</span>
-        </span>
-      </span>
-      <span className="project-share"><i style={{ width: `${share}%` }}/></span>
-      <span className="project-time">{fmtDur(group.minutes * MIN)}</span>
-      <span className="chevron"><Icon name="chevron"/></span>
-    </button>
-    {open && <div className="ledger-detail">
-      <div>
-        <div className="detail-label">会话标题</div>
-        {group.titles.length
-          ? <div className="task-list">{group.titles.map(t => <span className="task-chip" key={t}>{t}</span>)}</div>
-          : <span className="empty-note">这组会话没有可用标题。</span>}
-      </div>
-      <div>
-        <div className="detail-label">口径说明</div>
-        这些分钟来自各会话记录，只用于解释活动来源。并行会话可能重叠，因此不与动手时长相加。
-      </div>
-    </div>}
+// ── 证据簿：按仓库把 session 与 commit 并到一起 ──────────────────────
+function buildGroups() {
+  const repos = D.git.repos;
+  const repoOf = cwd => {
+    if (!cwd) return null;
+    let best = null;
+    for (const r of repos) {
+      if (cwd === r.path || cwd.startsWith(r.path + "/")) {
+        if (!best || r.path.length > best.path.length) best = r;
+      }
+    }
+    return best;
+  };
+
+  const map = new Map();
+  for (const s of D.sessions) {
+    const repo = repoOf(s.cwd);
+    const key = repo ? repo.path : `loose:${s.cwd ?? "unknown"}`;
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        key, repo,
+        name: repo ? repo.name : (s.cwd ?? "未知目录"),
+        path: repo ? repo.path : s.cwd,
+        branches: new Set(),
+        sessions: [], minutes: 0, output: 0,
+        commits: repo ? COMMITS.filter(c => c.repoName === repo.name) : [],
+      };
+      map.set(key, g);
+    }
+    if (s.branch) g.branches.add(s.branch);
+    g.sessions.push(s);
+    g.minutes += s.minutes;
+    g.output += s.tokens.output;
+  }
+  return [...map.values()].sort((a, b) =>
+    b.commits.length - a.commits.length || b.minutes - a.minutes);
+}
+const GROUPS = buildGroups();
+
+function CommitRow({ c }) {
+  return <div className="commit-row">
+    <code className="commit-hash">{c.hash}</code>
+    {c.type && <span className="commit-type">{c.type}{c.scope ? `(${c.scope})` : ""}</span>}
+    <span className="commit-subject">{c.description || c.subject}</span>
+    <span className="commit-stat">
+      <span className="add">+{c.insertions}</span><span className="del">−{c.deletions}</span>
+    </span>
+    <span className="commit-time">{fmtTime(c.at)}</span>
+    {c.copies > 0 && <span className="commit-copy" title="同一提交被 cherry-pick 到别的分支，已合并为一条">+{c.copies} 副本</span>}
+  </div>;
+}
+
+function SessionRow({ s }) {
+  const t = s.tokens;
+  return <div className="session-row">
+    <span className="session-tool">{s.tool === "claude-code" ? "CC" : "CX"}</span>
+    <span className="session-title">
+      {s.title || <em className="empty-note">无标题（Codex 不提供，留空不编造）</em>}
+      {s.isSidechain && <span className="session-tag">subagent</span>}
+    </span>
+    <span className="session-min">{s.minutes >= 1 ? fmtDur(s.minutes * MIN) : (s.minutes > 0 ? "<1m" : "—")}</span>
+    <span className="session-out" title={`输出 ${fmtInt(t.output)} tokens`}>{fmtCompact(t.output)}</span>
   </div>;
 }
 
 function Ledger() {
-  const [open, setOpen] = useState(0);
-  const named = DATA.groups.filter(g => g.branch && g.branch !== "HEAD");
-  const loose = DATA.groups.filter(g => !g.branch || g.branch === "HEAD");
-  const max = Math.max(...DATA.groups.map(g => g.minutes));
-  const looseTotal = loose.reduce((t, g) => t + g.minutes, 0);
+  const [open, setOpen] = useState(GROUPS.length ? GROUPS[0].key : null);
+  const max = Math.max(1, ...GROUPS.map(g => g.minutes));
   return <section className="section" id="evidence">
     <div className="section-head">
       <div>
         <h2>证据簿</h2>
-        <p className="section-note">按工作目录与分支归组，会话时长可重叠</p>
+        <p className="section-note">按仓库归组，session 与 commit 并列。会话时长可重叠，合计是上界</p>
+      </div>
+      <div className="legend legend-static">
+        {D.git.repos.length} 个仓库 · {COMMITS.length} 次提交 · {D.git.insertions + D.git.deletions} 行改动
       </div>
     </div>
+
     <div className="ledger">
-      {named.map((g, i) => <LedgerRow key={i} group={g} index={i + 1} share={(g.minutes / max) * 100}
-        open={open === i} onToggle={() => setOpen(open === i ? -1 : i)} />)}
-    </div>
-    <div className="ledger-loose">
-      <div className="loose-head">
-        <span>未归因证据</span>
-        <span>{loose.length} 组 · {fmtDur(looseTotal * MIN)}</span>
-      </div>
-      {loose.map((g, i) => <div className="loose-row" key={i}>
-        <span className="project-name">{g.cwd}</span>
-        <span className="project-meta"><span>{g.branch || "未识别分支"}</span><span>{g.tools.join(" + ")}</span><span>{g.sessions} sessions</span></span>
-        <span className="project-time">{fmtDur(g.minutes * MIN)}</span>
-      </div>)}
-      <p className="loose-note">没有可靠分支归属的会话保留为独立行，不并入上面的项目统计，也不丢弃。</p>
+      {GROUPS.map((g, i) => {
+        const isOpen = open === g.key;
+        return <div className={`ledger-row ${isOpen ? "open" : ""}`} key={g.key}>
+          <button className="ledger-summary" onClick={() => setOpen(isOpen ? null : g.key)} aria-expanded={isOpen}>
+            <span className="project-index">{String(i + 1).padStart(2, "0")}</span>
+            <span className="project-main">
+              <span className="project-name">
+                {g.name}
+                {!g.repo && <span className="session-tag">非 git 仓库</span>}
+              </span>
+              <span className="project-meta">
+                <span>{[...g.branches].join(" / ") || (g.repo && g.repo.branch) || "未识别分支"}</span>
+                <span>{g.sessions.length} sessions</span>
+                {g.commits.length > 0 && <span>{g.commits.length} commits</span>}
+                <span>输出 {fmtCompact(g.output)} tokens</span>
+              </span>
+            </span>
+            <span className="project-share"><i style={{ width: `${(g.minutes / max) * 100}%` }}/></span>
+            <span className="project-time">{fmtDur(g.minutes * MIN)}</span>
+            <span className="chevron"><Icon name="chevron"/></span>
+          </button>
+
+          {isOpen && <div className="ledger-detail">
+            <div className="detail-block">
+              <div className="detail-label">会话 · 标题与输出 tokens</div>
+              <div className="session-list">{g.sessions.map(s => <SessionRow key={s.id} s={s}/>)}</div>
+            </div>
+            <div className="detail-block">
+              <div className="detail-label">提交</div>
+              {g.commits.length
+                ? <div className="commit-list">{g.commits.map(c => <CommitRow key={c.hash} c={c}/>)}</div>
+                : <span className="empty-note">
+                    {g.repo ? "这个仓库当日没有你的提交。" : "不是 git 仓库，没有提交可关联。"}
+                  </span>}
+            </div>
+          </div>}
+        </div>;
+      })}
     </div>
   </section>;
 }
 
+// ── Token 用量 ──────────────────────────────────────────────────────
+function Tokens() {
+  const t = D.tokens;
+  const uncached = D.tokenSummary.uncachedInput;
+  const hit = t.cacheRead / (uncached + t.cacheRead);
+  return <section className="panel" id="tokens">
+    <h3>Token 用量</h3>
+    <div className="stat-lead">
+      <span className="stat-value">{fmtInt(t.output)}</span>
+      <span className="stat-unit">输出 tokens</span>
+    </div>
+    <p className="panel-note">其中推理 {fmtCompact(t.reasoning)}。这是当天真正被生成出来的量。</p>
+    <div className="bar-row">
+      <div className="bar"><i style={{ width: `${hit * 100}%` }}/></div>
+      <span className="bar-label">缓存命中 {(hit * 100).toFixed(0)}%</span>
+    </div>
+    <dl className="kv">
+      <div><dt>未命中缓存输入</dt><dd title={fmtInt(uncached)}>{fmtCompact(uncached)}</dd></div>
+      <div><dt>缓存读取</dt><dd title={fmtInt(t.cacheRead)}>{fmtCompact(t.cacheRead)}</dd></div>
+    </dl>
+    <p className="panel-caveat">
+      输入量不代表「你写了多少」：每一轮都要重发上下文，没命中缓存的部分会反复计入。
+      口径按事件时间归属到当日，不是把整份 session 文件记到今天。
+    </p>
+  </section>;
+}
+
+// ── 鼠标点击 ────────────────────────────────────────────────────────
+const COVERAGE_LABEL = { complete: "完整", partial: "部分", unavailable: "不可用" };
+
+function Mouse() {
+  const m = D.mouse;
+  const max = Math.max(1, ...m.byHour);
+  return <section className="panel" id="mouse">
+    <h3>鼠标点击</h3>
+    {m.enabled ? <>
+      <div className="stat-lead">
+        <span className="stat-value">{fmtInt(m.clicks)}</span>
+        <span className="stat-unit">次点击</span>
+      </div>
+      <p className="panel-note">
+        采集 {fmtDur(m.observedMinutes * MIN)} · {m.provider} · 覆盖 {COVERAGE_LABEL[m.coverage]}
+      </p>
+      <div className="hour-bars" role="img" aria-label="按小时的点击分布">
+        {m.byHour.map((v, h) => <i key={h} style={{ height: `${Math.max(2, (v / max) * 100)}%` }}
+          title={`${String(h).padStart(2, "0")}:00 · ${v} 次`}/>)}
+      </div>
+      <div className="hour-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+    </> : <>
+      <div className="stat-lead off"><span className="stat-value">未开启</span></div>
+      <p className="panel-note">默认关闭。开启后只保存按小时聚合的点击次数，不记录坐标、窗口名或应用名。</p>
+      <code className="cmd">goule activity start</code>
+    </>}
+    <p className="panel-caveat">
+      点击数是独立活动证据，<strong>不计入动手时长</strong>，也不参与压力信号。
+    </p>
+  </section>;
+}
+
 // ── 恢复信号 ────────────────────────────────────────────────────────
+const SIGNAL_META = {
+  late_night: { label: "夜间活动", unit: "m" },
+  past_midnight: { label: "跨过午夜", unit: "bool" },
+  short_recovery: { label: "距上次活动", unit: "h", lowerIsWorse: true },
+  consecutive_days: { label: "连续活跃", unit: "d" },
+  overlong_day: { label: "超长工作日", unit: "m" },
+  weekend_work: { label: "周末工作", unit: "m" },
+  no_break_block: { label: "无休息连续块", unit: "m" },
+};
+const fmtSignal = (v, unit) => {
+  if (unit === "bool") return v ? "是" : "否";
+  if (unit === "h") return `${v.toFixed(1)}h`;
+  if (unit === "d") return `${Math.round(v)}d`;
+  return `${Math.round(v)}m`;
+};
+
 function Recovery() {
+  const fired = D.signals.filter(s => s.fired);
   return <section className="section" id="recovery">
     <div className="section-head">
       <div>
         <h2>今天的恢复信号</h2>
-        <p className="section-note">7 项信号全部未触发，以下是其中 {DATA.signals.length} 项的观测值。只陈述事实，不打分。</p>
+        <p className="section-note">
+          {fired.length === 0
+            ? `${D.signals.length} 项信号全部未触发。只陈述观测事实，不打分。`
+            : `${D.signals.length} 项中触发了 ${fired.length} 项。压力债 ${D.debt.toFixed(2)}。`}
+        </p>
       </div>
     </div>
     <div className="signals">
-      {DATA.signals.map(s => <div className="signal" key={s.name}>
-        <span className="signal-name">{s.name}</span>
-        <span className="signal-value">{s.value}</span>
-        <span className="signal-threshold">阈值 {s.threshold}</span>
-      </div>)}
+      {D.signals.map(s => {
+        const meta = SIGNAL_META[s.id] || { label: s.id, unit: "m" };
+        return <div className={`signal ${s.fired ? "fired" : ""}`} key={s.id}>
+          <span className="signal-name">{meta.label}</span>
+          <span className="signal-value">{fmtSignal(s.value, meta.unit)}</span>
+          <span className="signal-threshold">
+            {meta.lowerIsWorse ? "低于" : "超过"} {fmtSignal(s.threshold, meta.unit)} 触发
+          </span>
+        </div>;
+      })}
     </div>
   </section>;
 }
 
 // ── 日报 ────────────────────────────────────────────────────────────
-const reportText = `# 2026-08-28 · 开发活动日报
-
-## 今日事实
-- 动手活动：${fmtDur(HAND_MS)}
-- Agent 独占运行：${fmtDur(AGENT_ONLY_MS)}（另有 ${fmtDur(OVERLAP_MS)} 与动手重叠，不计入）
-- 有效会话：${DATA.sessionCount}
-- 30 天动手 P90：${fmtDur(P90_MS)}
-
-## 主要证据
-- /Users/you/work/acme-api · master · 11 sessions
-- 未归因：/Users/you · 8 sessions · ${fmtDur(8.56355 * MIN)}
-
-## 恢复观察
-7 项信号均未触发。距上次活动 9h 05m，最长连续块 45m。
-
-> 事实层 · 未启用规则判断`;
+const reportText = [
+  `# ${D.dayId} · 开发活动日报`,
+  ``,
+  `## 今日事实`,
+  `- 动手活动：${fmtDur(HAND_MS)}`,
+  `- Agent 独占运行：${fmtDur(AGENT_ONLY_MS)}（另有 ${fmtDur(OVERLAP_MS)} 与动手重叠，不计入）`,
+  `- 有效会话：${D.sessions.length}`,
+  `- 输出 tokens：${fmtInt(D.tokens.output)}`,
+  `- 30 天动手 P90：${fmtDur(P90_MS)}`,
+  ``,
+  `## 提交`,
+  ...(COMMITS.length
+    ? COMMITS.map(c => `- \`${c.hash}\` ${c.subject} (+${c.insertions}/−${c.deletions})`)
+    : [`- 当日无提交`]),
+  ``,
+  `## 主要证据`,
+  ...GROUPS.map(g => `- ${g.name} · ${[...g.branches].join(" / ") || "未识别分支"} · ${g.sessions.length} sessions · ${g.commits.length} commits`),
+  ``,
+  `> 事实层 · 未启用规则判断`,
+].join("\n");
 
 function Report({ onCopy, copied }) {
+  const allQuiet = D.signals.every(s => !s.fired);
   return <div className="report-wrap">
     <div className="report-tools">
       <span>与核验页同一份本地扫描数据</span>
       <button className="copy-btn" onClick={onCopy}>{copied ? "已复制" : "复制 Markdown"}</button>
     </div>
     <article className="report-paper">
-      <div className="report-meta">GOULE DAILY · 2026-08-28</div>
+      <div className="report-meta">GOULE DAILY · {D.dayId}</div>
       <h2>开发活动日报</h2>
       <p>今天动手 {fmtDur(HAND_MS)}，分布在 {fmtTime(HAND_FIRST)} 到 {fmtTime(HAND_LAST)} 之间。</p>
       <hr className="report-rule"/>
@@ -292,17 +445,25 @@ function Report({ onCopy, copied }) {
       <ul>
         <li>动手活动：<code>{fmtDur(HAND_MS)}</code></li>
         <li>Agent 独占运行：<code>{fmtDur(AGENT_ONLY_MS)}</code>（另有 <code>{fmtDur(OVERLAP_MS)}</code> 与动手重叠，不计入）</li>
-        <li>有效会话：<code>{DATA.sessionCount}</code></li>
+        <li>有效会话：<code>{D.sessions.length}</code></li>
+        <li>输出 tokens：<code>{fmtInt(D.tokens.output)}</code></li>
         <li>30 天动手 P90：<code>{fmtDur(P90_MS)}</code></li>
       </ul>
+      <h3>提交</h3>
+      {COMMITS.length
+        ? <ul>{COMMITS.map(c =>
+            <li key={c.hash}><code>{c.hash}</code> {c.subject} <span className="report-dim">(+{c.insertions}/−{c.deletions})</span></li>)}
+          </ul>
+        : <p>当日无提交。</p>}
       <h3>主要证据</h3>
-      <ul>
-        <li><code>/Users/you/work/acme-api</code> · master · 11 sessions</li>
-        <li>未归因：<code>/Users/you</code> · 8 sessions · {fmtDur(8.56355 * MIN)}</li>
+      <ul>{GROUPS.map(g =>
+        <li key={g.key}><code>{g.name}</code> · {[...g.branches].join(" / ") || "未识别分支"} · {g.sessions.length} sessions · {g.commits.length} commits</li>)}
       </ul>
       <div className="report-callout">
-        <strong>今天没有触发恢复信号。</strong>
-        <p>距上次活动 9h 05m，最长连续块 45m。</p>
+        <strong>{allQuiet ? "今天没有触发恢复信号。" : "今天有恢复信号触发。"}</strong>
+        <p>{allQuiet
+          ? `${D.signals.length} 项信号全部在阈值内。`
+          : D.signals.filter(s => s.fired).map(s => (SIGNAL_META[s.id] || {}).label || s.id).join("、")}</p>
       </div>
       <hr className="report-rule"/>
       <div className="report-meta">事实层 · 未启用规则判断</div>
@@ -312,13 +473,16 @@ function Report({ onCopy, copied }) {
 
 // ── 首屏 ────────────────────────────────────────────────────────────
 function Hero() {
-  const topGroup = DATA.groups[0];
-  const leaf = topGroup.cwd.slice(topGroup.cwd.lastIndexOf("/") + 1);
+  const top = GROUPS[0];
   const ratio = Math.min(1, HAND_MS / P90_MS) * 100;
   return <section className="hero">
     <div className="hero-main">
       <h1>今天动手 <b>{fmtDur(HAND_MS)}</b></h1>
-      <p className="hero-sub">{fmtTime(HAND_FIRST)} – {fmtTime(HAND_LAST)} · {DATA.sessionCount} 个会话 · 主要在 {leaf}</p>
+      <p className="hero-sub">
+        {fmtTime(HAND_FIRST)} – {fmtTime(HAND_LAST)} · {D.sessions.length} 个会话
+        {COMMITS.length > 0 ? ` · ${COMMITS.length} 次提交` : ""}
+        {top ? ` · 主要在 ${top.name}` : ""}
+      </p>
       <div className="baseline">
         <div className="baseline-track"><i style={{ width: `${ratio}%` }}/></div>
         <div className="baseline-legend">
@@ -334,9 +498,9 @@ function Hero() {
         <span className="aside-note">产出杠杆的证据，不是工时，不与上面相加</span>
       </div>
       <div className="aside-row">
-        <span className="aside-label">与动手重叠</span>
-        <span className="aside-value">{fmtDur(OVERLAP_MS)}</span>
-        <span className="aside-note">机器在你动手期间同时在跑</span>
+        <span className="aside-label">输出 tokens</span>
+        <span className="aside-value">{fmtCompact(D.tokens.output)}</span>
+        <span className="aside-note">当天生成量，按事件时间归属</span>
       </div>
     </div>
   </section>;
@@ -371,6 +535,9 @@ function App() {
     return () => window.removeEventListener("keydown", key);
   }, []);
 
+  const dateLabel = D.dayId.replace(/-/g, ".");
+  const weekday = new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date(D.boundary.start));
+
   return <div className={`app density-${t.density} theme-${t.theme}`} style={cssVars}>
     <header className="topbar">
       <div className="brand">
@@ -378,8 +545,8 @@ function App() {
         <strong>Goule</strong>
       </div>
       <div className="date-nav">
-        <button className="icon-btn" onClick={() => flash("原型暂只装载 2026-08-28 数据")} aria-label="前一天"><Icon name="left"/></button>
-        <span className="date-label"><strong>2026.08.28</strong><span>星期五</span></span>
+        <button className="icon-btn" onClick={() => flash(`原型只装载 ${D.dayId} 的数据`)} aria-label="前一天"><Icon name="left"/></button>
+        <span className="date-label"><strong>{dateLabel}</strong><span>{weekday}</span></span>
         <button className="icon-btn" disabled aria-label="后一天"><Icon name="right"/></button>
       </div>
       <div className="topbar-right">
@@ -393,14 +560,20 @@ function App() {
 
     <main className="main"><div className="main-inner">
       {view === "verify"
-        ? <><Hero/><Timeline emphasis={t.timelineEmphasis}/><Ledger/><Recovery/></>
+        ? <>
+            <Hero/>
+            <Timeline emphasis={t.timelineEmphasis}/>
+            <Ledger/>
+            <div className="panel-row"><Tokens/><Mouse/></div>
+            <Recovery/>
+          </>
         : <Report onCopy={copy} copied={copied}/>}
     </div></main>
 
     <footer className="page-foot"><div className="main-inner">
       <span><i className="state-dot"/>本地数据已核验 · 无遥测</span>
       <span>事实层 · 未启用规则判断：无评分、无效率结论、无虚构提交记录</span>
-      <code>generated 2026-08-29</code>
+      <code>{D.dayId} · scanDay</code>
     </div></footer>
 
     <TweaksPanel title="Dusk Ledger">

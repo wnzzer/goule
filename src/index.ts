@@ -5,6 +5,7 @@ import { Glob } from 'bun'
 import { DEFAULT_CONFIG, resolveTz } from './types/config'
 import { logicalDay } from './types/day'
 import { activityStatus, startActivity, stopActivity } from './mouse/service'
+import { runGit } from './git/log'
 import { scanDay } from './scan'
 
 const command = Bun.argv[2] ?? "help";
@@ -64,6 +65,15 @@ async function doctor(): Promise<void> {
   for (const [name, status, root] of rows) {
     console.log(`${name.padEnd(12)}${status.padEnd(26)}${root}`)
   }
+  const git = DEFAULT_CONFIG.sources.git
+  if (!git.enabled) {
+    console.log(`${'Git'.padEnd(12)}已禁用`)
+  } else {
+    const v = await runGit(['--version'], process.cwd())
+    const author = git.authorEmails.length ? git.authorEmails.join(', ') : '各仓库 user.email'
+    console.log(`${'Git'.padEnd(12)}${(v.ok ? `✓ ${v.stdout.trim()}` : '✗ 不可用').padEnd(26)}  作者筛选：${author}`)
+  }
+
   const mouse = activityStatus(DEFAULT_CONFIG)
   console.log('')
   console.log(`鼠标采集    ${mouse.running ? `✓ 运行中（pid ${mouse.pid}）` : '未运行'}`)

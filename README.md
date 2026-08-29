@@ -74,14 +74,38 @@ macOS 首次启动需要给运行 Goule 的终端或 helper 授予“辅助功�
 
 | 来源 | 采集内容 | 状态 |
 | --- | --- | --- |
-| Claude Code | session 元数据：时间戳、cwd、分支、标题、token（含 subagent） | Phase 1 |
-| Codex | session 元数据：时间戳、cwd、分支、起始 commit、token | Phase 1 |
-| 本地 Git | commit 元数据、增删行数、Conventional Commits 分类 | Phase 1 |
+| Claude Code | session 元数据：时间戳、cwd、分支、标题、token（含 subagent） | ✅ 已接入 |
+| Codex | session 元数据：时间戳、cwd、分支、起始 commit、token | ✅ 已接入 |
+| 本地 Git | commit 元数据、增删行数、Conventional Commits 分类 | ✅ 已接入 |
 | 鼠标点击 | 逻辑日/小时聚合的点击次数（可选、本地） | macOS MVP |
 | Cursor | — | 未排期（`state.vscdb` 为未公开 schema） |
 | ActivityWatch / 飞书 | — | Phase 3 |
 
 **不采集**：对话正文、源码内容、完整 diff、按键内容。
+
+### token 的两个坑
+
+两家工具的 usage 都不能直接相加，实测：
+
+- **Claude Code 会重复落盘同一条 assistant 消息**：145 条 usage 记录只有 86 个不同
+  `message.id`，不按 id 去重会让 token 虚高约 **65%**。
+- **Codex 的 `total_token_usage` 是会话累计值**，每条 `token_count` 都重报全量，
+  相加会随消息条数线性虚高，只能取增量。
+
+token 按**事件时间**归属到逻辑日，而不是把整份 session 文件记到今天——扫描窗口
+有 30 天宽，否则一个月的用量会全算成今天的产出。
+
+另外 `input` 不代表「你写了多少」：每轮都要重发上下文，未命中缓存的部分反复计入。
+只有 `output` 是当天真正被生成出来的量。
+
+### git 的一个坑
+
+`--all` 会同时看到 feature 分支上的原件和 cherry-pick 到 dev 之后的副本，
+两者 hash 不同但 author date / 作者 / 标题一致。实测某日 4 条提交里有 2 对是
+这种副本，不合并会让「今天提交了几个」翻倍。Goule 合并它们，并把副本 hash
+记在 `copies` 里，不静默丢弃。
+
+提交按 **author date** 归属，不用 commit date——rebase / amend 会重写后者。
 
 ## 品牌文案
 

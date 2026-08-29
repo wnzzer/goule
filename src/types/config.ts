@@ -21,6 +21,14 @@ export interface MouseConfig {
   persist: boolean
 }
 
+export interface GitConfig {
+  enabled: boolean
+  /** session cwd 之外额外扫描的仓库根 */
+  extraRepos: string[]
+  /** 为空则每个仓库回退到自己的 user.email */
+  authorEmails: string[]
+}
+
 export interface Config {
   dayCutoffHour: number
   idleGapMinutes: number
@@ -29,6 +37,7 @@ export interface Config {
   sources: {
     claudeCode: { enabled: boolean; root: string }
     codex: { enabled: boolean; root: string }
+    git: GitConfig
   }
   mouse: MouseConfig
   stress: StressConfig
@@ -42,6 +51,7 @@ export const DEFAULT_CONFIG: Config = {
   sources: {
     claudeCode: { enabled: true, root: join(homedir(), '.claude', 'projects') },
     codex: { enabled: true, root: join(homedir(), '.codex', 'sessions') },
+    git: { enabled: true, extraRepos: [], authorEmails: [] },
   },
   mouse: {
     enabled: false,
