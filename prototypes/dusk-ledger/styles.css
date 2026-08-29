@@ -46,7 +46,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--mint);
 .brand-home { display: flex; align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; color: var(--mint); cursor: pointer; }
 .brand-home strong { color: var(--paper); }
 .brand-home:hover strong { color: var(--mint); }
-.brand-mark { width: 22px; height: 22px; color: var(--mint); }
+.brand-mark { width: 30px; height: 30px; color: var(--mint); }
 .brand strong { font-size: 15px; font-weight: 600; }
 .date-nav { display: flex; align-items: center; gap: 6px; justify-self: center; }
 .date-picker-wrap {
@@ -204,7 +204,8 @@ h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: 0; }
 .report-paper ul { padding-left: 20px; margin: 0; }
 .report-paper code { font-family: "IBM Plex Mono"; font-size: 11.5px; color: color-mix(in srgb, var(--mint) 85%, #000); background: color-mix(in srgb, var(--mint) 13%, transparent); padding: 2px 5px; border-radius: 3px; }
 .report-rule { border: 0; border-top: 1px solid var(--report-rule); margin: 28px 0; }
-.report-meta { color: color-mix(in srgb, var(--report-ink) 55%, transparent); font: 11px "IBM Plex Mono"; }
+.report-meta { display: flex; align-items: center; gap: 7px; color: color-mix(in srgb, var(--report-ink) 55%, transparent); font: 11px "IBM Plex Mono"; }
+.report-mark { width: 22px; height: 22px; flex: none; }
 .report-callout { border-left: 2px solid var(--mint); padding: 4px 0 4px 16px; margin-top: 26px; }
 .report-callout strong { font-weight: 600; }
 .report-callout p { margin: 6px 0 0; }

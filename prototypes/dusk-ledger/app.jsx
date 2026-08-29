@@ -160,6 +160,18 @@ function Icon({ name }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
+/** 品牌图标：黄昏表盘 + 收工刻度线 + 末端 commit 菱形，与 assets/icon-green.svg 同稿 */
+function BrandMark({ className = "brand-mark" }) {
+  return <svg className={className} viewBox="0 0 512 512" fill="none" aria-hidden="true">
+    <g opacity="0.14"><path d="M134 260A122 122 0 0 0 378 260" stroke="#8FE08A" strokeWidth="22"/><path d="M178 260A78 78 0 0 0 334 260" stroke="#8FE08A" strokeWidth="22"/><path d="M211 260A45 45 0 0 0 301 260Z" fill="#8FE08A"/></g>
+    <line x1="96" y1="260" x2="396" y2="260" stroke="#93A0AD" strokeOpacity="0.65" strokeWidth="7" strokeLinecap="round"/>
+    <path d="M134 260A122 122 0 0 1 378 260" stroke="#8FE08A" strokeWidth="22"/>
+    <path d="M178 260A78 78 0 0 1 334 260" stroke="#8FE08A" strokeWidth="22"/>
+    <path d="M211 260A45 45 0 0 1 301 260Z" fill="#8FE08A"/>
+    <path d="M416 240L436 260L416 280L396 260Z" fill="#62D6A7"/>
+  </svg>;
+}
+
 // ── 收工刻度 ────────────────────────────────────────────────────────
 function Timeline({ emphasis }) {
   const [visible, setVisible] = useState({ hand: true, agent: true, commit: true });
@@ -588,7 +600,7 @@ function Report({ onCopy, copied }) {
       </div>
     </div>
     <article className="report-paper">
-      <div className="report-meta">GOULE DAILY · {D.dayId}</div>
+      <div className="report-meta"><BrandMark className="report-mark"/>GOULE DAILY · {D.dayId}</div>
       <h2>今天做了什么</h2>
       <p>{REPORT_OVERVIEW} 代码提交保留在每条记录下方，方便继续核对。</p>
       <hr className="report-rule"/>
@@ -810,7 +822,7 @@ function App() {
     <header className="topbar">
       <div className="brand">
         <button className="brand-home" onClick={() => setView("verify")} aria-label="返回足迹首页">
-          <svg className="brand-mark" viewBox="0 0 32 32" fill="none"><path d="M7 5h18v18l-5 5H7V5Z" stroke="currentColor" strokeWidth="1.5"/><path d="M12 11h8M12 16h5M20 23v5" stroke="currentColor" strokeWidth="1.5"/></svg>
+          <BrandMark/>
           <strong>Goule</strong>
         </button>
       </div>
