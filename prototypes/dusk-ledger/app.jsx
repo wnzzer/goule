@@ -81,6 +81,11 @@ const timeFmt = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-d
 const fmtTime = ms => timeFmt.format(new Date(ms));
 const fmtInt = n => n.toLocaleString("zh-CN");
 /** 大数用紧凑写法，精确值放 title，避免一行里出现 117,299,274 这种读不动的串 */
+/** 中文行文用「万」，图表里仍用 K/M */
+function fmtWan(n) {
+  if (n < 10000) return fmtInt(n);
+  return `${(n / 10000).toFixed(1)} 万`;
+}
 function fmtCompact(n) {
   if (n < 10000) return fmtInt(n);
   if (n < 1e6) return `${(n / 1000).toFixed(n < 1e5 ? 1 : 0)}K`;
@@ -175,8 +180,8 @@ function Timeline({ emphasis }) {
   return <section className="section" id="timeline">
     <div className="section-head">
       <div>
-        <h2>收工刻度</h2>
-        <p className="section-note">{fmtTime(AXIS.start)} – {fmtTime(AXIS.end)}，逻辑日 04:00 → 次日 04:00</p>
+        <h2>我这一天的形状</h2>
+        <p className="section-note">从 {fmtTime(AXIS.start)} 到 {fmtTime(AXIS.end)}。一天从凌晨 4 点算起，不按午夜切</p>
       </div>
       <div className="legend">
         <button className={visible.hand ? "" : "off"} onClick={() => setVisible(v => ({ ...v, hand: !v.hand }))}><i className="key hand"/>动手</button>
@@ -226,8 +231,8 @@ function Timeline({ emphasis }) {
       </div>
 
       <p className="timeline-caption">
-        实心 = 你的输入证据，条纹 = Agent 在你动手期间同时运行（<strong>不计入 Agent 独占</strong>，共 {fmtDur(OVERLAP_MS)}）。
-        菱形是 commit 落点，按 author date 定位。短于 2 分钟的活动以细线标记，不放大成块。
+        实心是我真的在敲键盘，条纹是机器在我敲的同时也在跑（<strong>这段不算进「机器替我跑」</strong>，一共 {fmtDur(OVERLAP_MS)}）。
+        菱形是提交落地的时刻。不到 2 分钟的动作画成细线——它们是回头看一眼，不是一段活儿。
       </p>
     </div>
   </section>;
@@ -292,7 +297,7 @@ function SessionRow({ s, maxMin, maxOut }) {
   return <div className="session-row">
     <span className="session-tool">{s.tool === "claude-code" ? "CC" : "CX"}</span>
     <span className="session-title">
-      {s.title || <em className="empty-note">无标题（Codex 不提供，留空不编造）</em>}
+      {s.title || <em className="empty-note">这段没留下标题（Codex 不给，我也不替它编）</em>}
       {s.isSidechain && <span className="session-tag">subagent</span>}
     </span>
     <MiniBar value={s.minutes} max={maxMin} tone="a"/>
@@ -309,7 +314,7 @@ function Ledger() {
     <div className="section-head">
       <div>
         <h2>证据簿</h2>
-        <p className="section-note">按仓库归组，session 与 commit 并列。会话时长可重叠，合计是上界</p>
+        <p className="section-note">今天的活儿都落在这儿。几个会话可能同时开着，所以时长合计只是上界，别当工时</p>
       </div>
       <div className="legend legend-static">
         {D.git.repos.length} 个仓库 · {COMMITS.length} 次提交 · {D.git.insertions + D.git.deletions} 行改动
@@ -341,7 +346,7 @@ function Ledger() {
 
           {isOpen && <div className="ledger-detail">
             <div className="detail-block">
-              <div className="detail-label">会话 · 标题与输出 tokens</div>
+              <div className="detail-label">我开过的会话</div>
               <div className="session-head"><span/><span>会话</span><span>动手</span><span>输出</span></div>
               <div className="session-list">{g.sessions.map(s =>
                 <SessionRow key={s.id} s={s}
@@ -349,13 +354,13 @@ function Ledger() {
                   maxOut={Math.max(...g.sessions.map(x => x.tokens.output), 1)}/>)}</div>
             </div>
             <div className="detail-block">
-              <div className="detail-label">提交</div>
+              <div className="detail-label">落了地的提交</div>
               {g.commits.length
                 ? <div className="commit-list">{g.commits.map(c =>
                     <CommitRow key={c.hash} c={c}
                       scale={Math.max(...g.commits.map(x => Math.max(x.insertions, x.deletions)), 1)}/>)}</div>
                 : <span className="empty-note">
-                    {g.repo ? "这个仓库当日没有你的提交。" : "不是 git 仓库，没有提交可关联。"}
+                    {g.repo ? "这个仓库今天没有我的提交——活儿还在手上。" : "这儿不是 git 仓库，没有提交可对。"}
                   </span>}
             </div>
           </div>}
@@ -384,16 +389,16 @@ function Tokens() {
   const hit = t.cacheRead / (uncached + t.cacheRead);
   const maxOut = Math.max(1, ...BY_TOOL.map(x => x.output));
   return <section className="panel" id="tokens">
-    <h3>Token 用量</h3>
+    <h3>机器替我写了多少</h3>
 
     <div className="stat-lead">
       <span className="stat-value">{fmtInt(t.output)}</span>
-      <span className="stat-unit">输出 tokens</span>
+      <span className="stat-unit">token 是真被写出来的</span>
     </div>
-    <p className="panel-note">其中推理 {fmtCompact(t.reasoning)}。这是当天真正被生成出来的量。</p>
+    <p className="panel-note">其中 {fmtWan(t.reasoning)} 花在推理上。这个数是实打实生成出来的，不是「送进去过」的。</p>
 
     <div className="chart-block">
-      <div className="chart-title">按工具的输出量</div>
+      <div className="chart-title">谁写得多</div>
       {BY_TOOL.map(x => <div className="tool-row" key={x.tool}>
         <span className="tool-name">{TOOL_LABEL[x.tool] || x.tool}</span>
         <MiniBar value={x.output} max={maxOut} tone="a"/>
@@ -403,7 +408,7 @@ function Tokens() {
     </div>
 
     <div className="chart-block">
-      <div className="chart-title">输入构成 · 缓存命中 {(hit * 100).toFixed(0)}%</div>
+      <div className="chart-title">送进去的部分 · 有 {(hit * 100).toFixed(0)}% 是缓存里捞的</div>
       <StackBar parts={[
         { key: "uncached", value: uncached, label: "未命中缓存" },
         { key: "cached", value: t.cacheRead, label: "缓存读取" },
@@ -415,8 +420,8 @@ function Tokens() {
     </div>
 
     <p className="panel-caveat">
-      输入量与输出量是两个不同的度量，刻意分成两张图、不共用坐标轴。
-      输入量也不代表「你写了多少」：每一轮都要重发上下文，没命中缓存的部分会反复计入。
+      送进去的和写出来的是两回事，所以分成两张图、不共一根轴。
+      送进去的量也不等于我写了多少：每问一轮都要把上下文重发一遍，没命中缓存的部分会被反复算。
     </p>
   </section>;
 }
@@ -430,15 +435,15 @@ function Hourly() {
   const activeHours = D.handsOnByHour.filter(v => v > 0).length;
   const peak = D.handsOnByHour.indexOf(Math.max(...D.handsOnByHour));
   return <section className="panel" id="hourly">
-    <h3>按小时分布</h3>
+    <h3>我这一天是怎么散开的</h3>
 
     <div className="chart-block">
-      <div className="chart-title">动手分钟数 · 覆盖 {activeHours} 个小时，峰值在 {String(peak).padStart(2, "0")}:00</div>
+      <div className="chart-title">我动手的分钟数 · 摊在 {activeHours} 个小时里，{String(peak).padStart(2, "0")}:00 最密</div>
       <HourBars values={D.handsOnByHour} unit="分钟" tone="a"/>
     </div>
 
     <div className="chart-block">
-      <div className="chart-title">鼠标点击次数</div>
+      <div className="chart-title">我点了多少下鼠标</div>
       {m.enabled
         ? <>
             <HourBars values={m.byHour} unit="次" tone="b"/>
@@ -447,15 +452,14 @@ function Hourly() {
             </p>
           </>
         : <div className="chart-empty">
-            <span>采集未开启，这一格没有数据——不画占位曲线。</span>
+            <span>这个我还没开。没有数据就空着，不画条假曲线糊弄自己。</span>
             <code className="cmd">goule activity start</code>
           </div>}
     </div>
 
     <p className="panel-caveat">
-      两张图共用 24 小时坐标轴但<strong>各自独立</strong>：分钟数与点击次数量纲不同，不叠在一张图上。
-      点击数是独立活动证据，<strong>不计入动手时长</strong>，也不参与压力信号。
-      动手合计 {fmtDur(handTotal * MIN)}。
+      两张图共用一根 24 小时的轴，但<strong>各算各的</strong>：分钟和次数不是一个量纲，不叠一起。
+      点击只是另一种「我在场」的证据，<strong>不算进工时</strong>，也不参与恢复信号。
     </p>
   </section>;
 }
@@ -482,16 +486,16 @@ function Recovery() {
   return <section className="section" id="recovery">
     <div className="section-head">
       <div>
-        <h2>今天的恢复信号</h2>
+        <h2>我今天透支了吗</h2>
         <p className="section-note">
           {fired.length === 0
-            ? `${D.signals.length} 项信号全部未触发。每一项按自己的量纲和阈值单独衡量，不合成分数。`
-            : `${D.signals.length} 项中触发了 ${fired.length} 项。压力债 ${D.debt.toFixed(2)}。`}
+            ? `${D.signals.length} 项都没响。每项按自己的量纲比自己的线，不合成一个分数——那种数字只会变成新的鞭子。`
+            : `${fired.length} 项响了。它们不是罪状，是今天可以少做一点的理由。`}
         </p>
       </div>
       <div className="legend legend-static">
-        <span><i className="key bullet-key"/>观测值</span>
-        <span><i className="key thresh-key"/>阈值</span>
+        <span><i className="key bullet-key"/>今天</span>
+        <span><i className="key thresh-key"/>我的线</span>
       </div>
     </div>
     <div className="signals">
@@ -509,7 +513,7 @@ function Recovery() {
                 lowerIsWorse={meta.lowerIsWorse}
                 label={`${meta.label} ${fmtSignal(s.value, meta.unit)}，${dir} ${fmtSignal(s.threshold, meta.unit)} 触发`}/>}
           <span className="signal-value">{fmtSignal(s.value, meta.unit)}</span>
-          <span className="signal-threshold">{dir} {fmtSignal(s.threshold, meta.unit)}</span>
+          <span className="signal-threshold">{dir} {fmtSignal(s.threshold, meta.unit)} 才算数</span>
         </div>;
       })}
     </div>
@@ -542,7 +546,7 @@ function Report({ onCopy, copied }) {
   const allQuiet = D.signals.every(s => !s.fired);
   return <div className="report-wrap">
     <div className="report-tools">
-      <span>与核验页同一份本地扫描数据</span>
+      <span>和上一页同一份数据，只是换了个排版</span>
       <button className="copy-btn" onClick={onCopy}>{copied ? "已复制" : "复制 Markdown"}</button>
     </div>
     <article className="report-paper">
@@ -580,36 +584,97 @@ function Report({ onCopy, copied }) {
   </div>;
 }
 
+// ── 结论 ────────────────────────────────────────────────────────────
+// 只从当天事实推，不引入分数、不引入「效率」。四种状态各写各的话，
+// 不做「今天真棒」这种与数据无关的鼓励。
+function summarize() {
+  const fired = D.signals.filter(s => s.fired);
+  const commits = COMMITS.length;
+  const lines = D.git.insertions + D.git.deletions;
+  const ratio = P90_MS > 0 ? HAND_MS / P90_MS : 0;
+  const hh = fmtDur(HAND_MS);
+  const p90 = fmtDur(P90_MS);
+
+  if (fired.length) {
+    const names = fired.map(x => (SIGNAL_META[x.id] || {}).label || x.id).join("、");
+    return {
+      tone: "overdrawn",
+      headline: "今天先停在这儿吧。",
+      body: `${names}已经亮了。我不给今天打分，但这几项摆在这儿——今天「够了」的门槛该往下调一点。`,
+      advice: "把手上这块收尾就关机，别再起新分支。",
+    };
+  }
+  if (ratio >= 1) {
+    return {
+      tone: "plenty",
+      headline: "够了，早点下班。",
+      body: `我今天动手 ${hh}，已经越过自己平常的 ${p90}。`
+        + (commits ? `${commits} 个提交都落了地。` : "")
+        + "再往下做，边际是负的。",
+      advice: "现在就收，剩下的明天再说。",
+    };
+  }
+  if (commits > 0 || D.tokens.output >= 100000) {
+    return {
+      tone: "enough",
+      headline: "够了，今天可以收工。",
+      body: `动手 ${hh}，比我平常的 ${p90} 少——但 `
+        + (commits ? `${commits} 个提交都推上去了，改了 ${lines} 行；` : "")
+        + `机器还替我多跑了 ${fmtDur(AGENT_ONLY_MS)}。手没停多久，事情是办完了的。`,
+      advice: "证据够了，别用「才干了两个多小时」为难自己。",
+    };
+  }
+  return {
+    tone: "light",
+    headline: "今天手头很轻。",
+    body: `动手 ${hh}，没有提交落地。也可能今天的活儿本来就不在编辑器里——这里只记看得见的那部分。`,
+    advice: "不下结论。想接着做就做，想收也随时可以。",
+  };
+}
+const SUMMARY = summarize();
+
 // ── 首屏 ────────────────────────────────────────────────────────────
 function Hero() {
   const top = GROUPS[0];
   const ratio = Math.min(1, HAND_MS / P90_MS) * 100;
-  return <section className="hero">
+  const streak = D.signals.find(x => x.id === "consecutive_days");
+  const chips = [
+    COMMITS.length ? `${COMMITS.length} 个提交落地` : "没有提交落地",
+    `改了 ${D.git.insertions + D.git.deletions} 行`,
+    `模型吐出 ${fmtWan(D.tokens.output)} token`,
+    `${D.sessions.length} 段会话`,
+    streak ? `连着干了 ${Math.round(streak.value)} 天` : null,
+  ].filter(Boolean);
+
+  return <section className={`hero tone-${SUMMARY.tone}`}>
     <div className="hero-main">
-      <h1>今天动手 <b>{fmtDur(HAND_MS)}</b></h1>
-      <p className="hero-sub">
-        {fmtTime(HAND_FIRST)} – {fmtTime(HAND_LAST)} · {D.sessions.length} 个会话
-        {COMMITS.length > 0 ? ` · ${COMMITS.length} 次提交` : ""}
-        {top ? ` · 主要在 ${top.name}` : ""}
-      </p>
+      <h1>{SUMMARY.headline}</h1>
+      <p className="hero-body">{SUMMARY.body}</p>
+      <p className="hero-advice"><span className="advice-tag">我的建议</span>{SUMMARY.advice}</p>
+
       <div className="baseline">
         <div className="baseline-track"><i style={{ width: `${ratio}%` }}/></div>
         <div className="baseline-legend">
-          <span>今天 {fmtDur(HAND_MS)}</span>
-          <span>你 30 天的 P90 是 {fmtDur(P90_MS)}</span>
+          <span>我今天动手 <strong>{fmtDur(HAND_MS)}</strong></span>
+          <span>平常这个点我会到 {fmtDur(P90_MS)}</span>
         </div>
       </div>
+
+      <ul className="hero-chips">
+        {chips.map(c => <li key={c}>{c}</li>)}
+      </ul>
     </div>
+
     <div className="hero-aside">
       <div className="aside-row">
-        <span className="aside-label">Agent 独占运行</span>
-        <span className="aside-value">{fmtDur(AGENT_ONLY_MS)}</span>
-        <span className="aside-note">产出杠杆的证据，不是工时，不与上面相加</span>
+        <span className="aside-label">我真正动手</span>
+        <span className="aside-value">{fmtDur(HAND_MS)}</span>
+        <span className="aside-note">{fmtTime(HAND_FIRST)} 敲下第一个键，{fmtTime(HAND_LAST)} 停手{top ? `，主要在 ${top.name}` : ""}</span>
       </div>
       <div className="aside-row">
-        <span className="aside-label">输出 tokens</span>
-        <span className="aside-value">{fmtCompact(D.tokens.output)}</span>
-        <span className="aside-note">当天生成量，按事件时间归属</span>
+        <span className="aside-label">机器替我跑</span>
+        <span className="aside-value">{fmtDur(AGENT_ONLY_MS)}</span>
+        <span className="aside-note">这是杠杆，不是我的工时——两个数不相加</span>
       </div>
     </div>
   </section>;
@@ -680,8 +745,8 @@ function App() {
     </div></main>
 
     <footer className="page-foot"><div className="main-inner">
-      <span><i className="state-dot"/>本地数据已核验 · 无遥测</span>
-      <span>事实层 · 未启用规则判断：无评分、无效率结论、无虚构提交记录</span>
+      <span><i className="state-dot"/>全都在你自己机器上，没往外传一个字节</span>
+      <span>这页只摆事实：不打分、不评效率、不替你编没发生过的提交</span>
       <code>{D.dayId} · scanDay</code>
     </div></footer>
 

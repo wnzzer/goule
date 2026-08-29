@@ -66,10 +66,10 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--mint);
 .mode-tab.active { background: var(--paper); color: var(--night); }
 
 /* ── 首屏：结论就是那个数字 ────────────────────────────── */
-.hero { display: grid; grid-template-columns: 1.55fr 1fr; gap: 56px; align-items: start; margin-bottom: 64px; }
+.hero { display: grid; grid-template-columns: 1.6fr 1fr; gap: 52px; align-items: start; margin-bottom: 60px; }
 h1 { margin: 0; font-size: clamp(30px, 3.6vw, 46px); font-weight: 500; line-height: 1.25; letter-spacing: 0; }
 h1 b { font-weight: 600; font-family: "IBM Plex Mono", ui-monospace, monospace; letter-spacing: -.03em; }
-.hero-sub { margin: 14px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.7; }
+
 
 .baseline { margin-top: 28px; }
 .baseline-track { height: 6px; border-radius: 3px; background: var(--wash-strong); overflow: hidden; }
@@ -497,4 +497,48 @@ h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: 0; }
   .diffbar { display: none; }
   .tool-row { grid-template-columns: 74px minmax(0,1fr) 48px; }
   .tool-meta { display: none; }
+}
+
+
+/* ── 首屏结论 ─────────────────────────────────────────── */
+.hero-body {
+  margin: 16px 0 0; max-width: 640px;
+  color: var(--paper); font-size: 15px; line-height: 1.95;
+}
+.hero-advice {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin: 18px 0 0; padding: 12px 0 0; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 13px; line-height: 1.8;
+}
+.advice-tag {
+  flex: none; font-size: 11px; color: var(--mint);
+  border: 1px solid color-mix(in srgb, var(--mint) 38%, transparent);
+  border-radius: 5px; padding: 2px 8px;
+}
+.hero .baseline { margin-top: 26px; }
+.baseline-legend strong { color: var(--paper); font-weight: 500; }
+
+.hero-chips {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 20px 0 0; padding: 0; list-style: none;
+}
+.hero-chips li {
+  color: var(--muted); font-size: 11.5px;
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px;
+}
+
+/* 情绪只靠一处：建议标签的颜色。整页不铺色块、不做警报感 */
+.hero.tone-overdrawn .advice-tag,
+.hero.tone-plenty .advice-tag {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 42%, transparent);
+}
+
+.density-compact .hero-body { font-size: 14px; line-height: 1.85; margin-top: 12px; }
+.density-compact .hero-advice { margin-top: 14px; padding-top: 10px; }
+.density-compact .hero-chips { margin-top: 16px; }
+
+@media (max-width: 900px) {
+  .hero-body { font-size: 14px; }
+  .hero-chips { gap: 6px; }
 }
