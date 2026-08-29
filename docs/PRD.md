@@ -7,6 +7,17 @@
 
 ---
 
+> **⚠️ 排期变更（2026-08-29）**
+>
+> 本文档的**产品判断与原则保持有效**，但 §6 的实现排期已被 Phase 1 设计主动重排：
+> session 导入从 v0.3 提前到首期，Dashboard 与 SQLite 推迟。理由是规则阈值需要真实
+> 数据标定，数据管道应先于规则引擎。
+>
+> 以 [`docs/superpowers/specs/2026-08-29-goule-phase1-design.md`](superpowers/specs/2026-08-29-goule-phase1-design.md)
+> 为当前实现依据；两者冲突时以设计文档为准。差异对照见其 §1.1。
+
+---
+
 ## 文档信息
 
 | 项 | 内容 |

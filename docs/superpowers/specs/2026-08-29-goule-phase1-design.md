@@ -48,6 +48,9 @@ PRD 的原则不变：Local-first、Evidence over vibe、No keylogger、不读�
 | 当日数据量 | **283 MB / 39277 条记录** | 绝大部分是对话正文与代码，而我们只需元数据 |
 | 全量 `JSON.parse` 耗时 | **1073 ms** | 朴素解析可行但浪费 27 倍 |
 | 流式正则 + 选择性解析 | **124 ms**（8.7x） | 采纳为 L1 实现策略，见 §6.4 |
+| **真人输入占全部记录** | **8.89%**（15641 / 175901） | 「有记录」≠「人在工作」，见 §4.3 |
+| **误用全部记录当工时** | 近 30 天 163 h vs 真实 100 h，**虚高 63%**；单日最高虚高 **7.3×** | `active_minutes` 必须锚定真人输入 |
+| 单个 session 文件极值 | **466 MB / 跨 13 天 / 45117 条记录**，其中真人输入仅 150 条 | session 文件会被 resume 持续追加，且多为 agent 自动记录 |
 | 记录间隔 P50 / P99 | 0.1 s / 72.8 s | 活跃时记录极密，idle 阈值有充足余量 |
 | 裸 span 合计 | 4453 h（含单个 1038 h 的 session） | first→last 完全不可用作时长 |
 | 活跃时长 / 裸 span | 4%–9%（阈值 2–60 min 区间） | 阈值不敏感，不值得投入调参 |
@@ -68,6 +71,8 @@ PRD 的原则不变：Local-first、Evidence over vibe、No keylogger、不读�
 | 5 | adapter 接口 | 取字段**并集** + 可空，不取交集 |
 | 6 | 逻辑日边界 | `day_cutoff_hour` 默认 04:00 本地时间 |
 | 7 | idle 阈值 | `idle_gap_minutes` 默认 10 |
+| 8 | **工时口径** | 拆为 `hands_on_minutes`（真人输入锚定，唯一工时口径）与 `agent_minutes`（agent 自主运行，产出杠杆指标），**不得混算** |
+| 9 | **压力分析定位** | 压力**降低「够了」的门槛**，不单独出分。信号计算属 Phase 1，门槛折扣属 Phase 2 |
 
 ### 3.1 为何不上 SQLite
 
@@ -104,21 +109,45 @@ day_id "2026-08-28"  ≡  [2026-08-28 04:00, 2026-08-29 04:00)  本地时区
 
 ### 4.3 切块算法
 
+**锚点是真人输入事件，不是全部记录。** 这是本节最重要的约束，理由见下。
+
 ```
 输入：RawSession[]
-1. 每个 session 内，按 events[].at 排序
-2. 相邻间隔 > idle_gap_minutes(10) 则断开 → 得到该 session 的块
-3. 块时长 = last - first；若为 0，计 min_block_credit(60s)
-4. 收集所有 session 的所有块，跨工具做区间并集(interval union)
-5. 按逻辑日边界裁剪
-6. active_minutes = 并集后各块时长之和
+1. 从 events 中筛出 kind == 'human'（真人输入）→ 得到锚点序列
+2. 每个 session 内按锚点时间排序
+3. 相邻锚点间隔 > idle_gap_minutes(10) 则断开 → 得到该 session 的块
+4. 块时长 = last - first；若为 0，计 min_block_credit(60s)
+5. 收集所有 session 的所有块，跨工具做区间并集(interval union)
+6. 按逻辑日边界裁剪
+7. hands_on_minutes = 并集后各块时长之和
 ```
 
+- **步骤 1 是正确性的根基。** 实测真人输入仅占全部记录的 **8.89%**（15641/175901）。若以全部记录为锚点，近 30 天算出 163 h，而真实 hands-on 是 100 h，**虚高 63%**；单日最坏虚高 **7.3 倍**（2026-08-13：1123 min vs 153 min）。对一个核心命题是「够了，到点下班」的产品，这等于在用户实际动手 2.6 小时的那天告诉他「你干了 18.7 小时」。
 - **步骤 2 按文件聚合，不按记录**：Codex 的 `session_meta` 仅出现在首行，按记录聚合会碎成大量单记录幽灵 session。
-- **步骤 4 的并集是正确性要求**：并行开多个窗口时，分别求和再相加会虚高（实测 5%）。
-- **步骤 3 的最小信用**：单记录块代表一次真实交互，计 0 不诚实；但也不应让它冒充工作块，故给固定小额信用。
+- **步骤 5 的并集是正确性要求**：并行开多个窗口时，分别求和再相加会虚高（实测 5%）。subagent 的块必然与父 session 重叠，同样由并集处理。
+- **步骤 4 的最小信用**：单锚点块代表一次真实交互，计 0 不诚实；但也不应让它冒充工作块，故给固定小额信用。
 
 阈值选择：P99 记录间隔为 73 秒，10 分钟有 8 倍余量。实测 2→60 分钟的阈值扫描中结果始终在同一数量级，该参数不敏感，不值得投入调参。
+
+#### 真人输入的判别
+
+| 工具 | 谓词 |
+| --- | --- |
+| Claude Code | `type == "user"` 且 `userType == "external"` 且 `isSidechain != true`，且 message.content 非 `tool_result` |
+| Codex | `payload.role == "user"`（排除 `developer` / `assistant`） |
+
+CC 的 `tool_result` 同样以 `type: "user"` 落盘，**必须排除**，否则仍会把 agent 循环计入工时。实测用粗谓词（未排除 tool_result）得到的 100 h 是 hands-on 的**上界**，精确谓词会进一步收敛。此谓词是 L1 的核心逻辑，须有针对性 fixture 测试。
+
+### 4.4 agent 时长单独建模
+
+`agent_minutes` = 以**全部记录**为锚点、同样切块并集后的时长，减去 `hands_on_minutes` 的部分。
+
+它不是工时，但是有价值的证据：PRD 的 P1 用户正是「commit 可能少但 session 长」的 Vibe Coder，agent 自主运行时长是**产出杠杆**的度量。两者并列呈现、永不相加：
+
+- 「够了没」的判定（Phase 2）与压力分析（§5.2）**只能用 `hands_on_minutes`**
+- 日报中 `agent_minutes` 作为独立一行呈现，措辞须避免暗示其为工时
+
+实测极端案例：单个 Codex rollout 文件 466 MB、跨 13 天、45117 条记录，其中真人输入 150 条。若不做此区分，该文件会独自贡献 18.7 小时的虚假工时。
 
 ---
 
@@ -134,11 +163,19 @@ DayFacts {
   generated_at: Instant,
 
   activity: {
-    blocks: [{ start: Instant, end: Instant, minutes: number,
-               sources: ToolId[] }],        // 已做区间并集
-    active_minutes: number,
-    by_hour: number[24]                     // 分钟/小时，供热力条
+    hands_on: {                             // ★ 唯一工时口径，真人输入锚定
+      blocks: [{ start: Instant, end: Instant, minutes: number,
+                 sources: ToolId[] }],      // 已做区间并集
+      minutes: number,
+      by_hour: number[24]                   // 分钟/小时，供热力条
+    },
+    agent: {                                // 产出杠杆指标，非工时，永不与上者相加
+      blocks: [...],
+      minutes: number
+    }
   },
+
+  stress: { /* 见 §5.2 */ },
 
   ai: {
     sessions: [{
@@ -194,6 +231,48 @@ DayFacts {
 **`unattributed` 是一等公民。** 实测存在 `cwd=$HOME`、`branch=HEAD` 的 session，无法关联任何 repo。静默丢弃是这类工具最主要的失信来源——用户确实干了活，工具却说没有。宁可显示「3 个 session 未能关联到 repo」也不假装它们不存在。
 
 **`joined` 是首期唯一不可替代的输出。** git-standup 给 commit 列表，worklog 给时长，没有工具能给出「在 `acme-api/master` 上，2 个 AI session（164 min）产出了 5 个 commit」。首期若只交付一样东西，是这个。
+
+### 5.2 压力信号
+
+压力分析的定位（冻结决策 #9）：**压力降低「够了」的门槛，不单独出分。**
+
+不出独立分数是刻意的。PRD §12 已把「规则误判引发焦虑」列为首要风险，而一个说「你压力 78 分」却不给动作的数字，只会变成又一个自我鞭挞的指标——与产品的反 PUA 立场直接冲突。让压力成为**下班的理由**，才是这个产品该有的形状。
+
+**全部信号锚定 `hands_on_minutes`。** agent 跑一整夜不会让人疲劳，用错口径会凭空制造压力：实测模型 A 会把本机数据描绘成「3 天深夜工作、日均 6.5 h」的 workaholic，而真实 hands-on 是规律的 3.5 h。
+
+| 信号 | 定义 | 默认阈值 | 本机 36 天实测触发 |
+| --- | --- | --- | --- |
+| `late_night` | 23:00–06:00 的 hands_on 分钟 | > 30 min | **1 / 36 天** |
+| `past_midnight` | 工作块跨越 00:00 | — | 2 / 36 天 |
+| `short_recovery` | 昨日末锚点 → 今日首锚点的间隔 | < 8 h | 1 / 29 天 |
+| `consecutive_days` | 连续有活动的逻辑日 | ≥ 6 天 | 2 次 |
+| `overlong_day` | hands_on 超**个人** P90 | 个人基线（本机 384 min） | 按定义 ~10% |
+| `weekend_work` | 周末 hands_on | > 60 min | 1 / 10 个周末日 |
+| `no_break_block` | 单个连续块无间断时长 | > 120 min | — |
+
+`overlong_day` 用**个人历史 P90** 而非硬编码工时，直接落实 PRD 的「Rules you own，不硬编码 996 标准」——基线是用户自己的分布，不是别人的标准。历史不足 14 天时该信号不参与，避免新用户被无意义基线误判。
+
+**压力债模型：**
+
+```
+debt = Σ_signal  weight(signal) × 0.5 ^ (days_ago / half_life_days)
+```
+
+`half_life_days` 默认 3。用半衰而非「连续 N 天」窗口，因为恢复是渐进的：昨天熬夜比三天前熬夜欠得多，而三天前的透支不应突然归零。
+
+```jsonc
+stress: {
+  signals: [{ id, fired: boolean, value: number, threshold: number, days_ago: number }],
+  debt: number,                       // 归一到 0..1
+  baseline: { hands_on_p90: number, window_days: 30, sufficient: boolean }
+}
+```
+
+**Phase 归属**：信号与 `debt` 的计算属 **Phase 1**——它们是可审计的事实，天然属于 `DayFacts`。消费 `debt` 去调整门槛属 **Phase 2**（规则引擎），见 §12。
+
+**呈现规则**：措辞必须是下班的理由，不是待改进的指标。「你昨天工作到 01:20，今天这些就够了」——而非「你的压力指数是 78」。
+
+**一条设计验证**：本机 36 天数据里，`late_night` 只触发 1 次、`short_recovery` 1 次。一个在作息健康的用户身上疯狂报警的压力分析就是坏的；这份数据表明信号阈值选对了。
 
 ---
 
@@ -344,7 +423,8 @@ goule doctor                       # 数据源可达性诊断（P1）
 ```
 ~/.goule/
   config.yaml                  # 见下
-  notes/YYYY-MM-DD.json        # 唯一持久化数据
+  notes/YYYY-MM-DD.json        # 用户笔记
+  activity/YYYY-MM-DD.json     # 可选鼠标活动聚合（无原始事件）
 ```
 
 ```yaml
@@ -355,10 +435,24 @@ timezone: auto                 # 或 IANA 名
 sources:
   claude_code: { enabled: true, root: ~/.claude/projects }
   codex:       { enabled: true, root: ~/.codex/sessions }
+mouse:
+  enabled: false
+  provider: auto
+  persist: true
 git:
   repos: ["~/work", "~/projects"]   # 递归扫描根
   author: auto                              # 取 git config user.email
   exclude_merge: true
+stress:
+  half_life_days: 3
+  late_night_window: [23, 6]        # 本地时
+  late_night_minutes: 30
+  short_recovery_hours: 8
+  consecutive_days: 6
+  weekend_minutes: 60
+  no_break_block_minutes: 120
+  baseline_window_days: 30
+  baseline_min_days: 14             # 不足则 overlong_day 不参与
 polish:
   enabled: false
   provider: ollama
@@ -366,6 +460,32 @@ polish:
 ```
 
 `~/.goule` 可整体删除，无残留。
+
+### 9.1 鼠标点击活动（可选扩展）
+
+鼠标点击作为独立的活动证据接入，不改变 `hands_on` 的真人 session 锚定口径，也不直接
+参与压力信号或规则判定。默认关闭，用户显式执行 `goule activity start` 后才开始采集。
+
+内部事件只保留 `{ at: Instant }`；持久化只保存按逻辑日和本地小时聚合的结果：
+
+```jsonc
+activity.mouse_clicks {
+  enabled: boolean,
+  clicks: number,
+  by_hour: number[24],
+  observed_minutes: number,
+  coverage: "complete" | "partial" | "unavailable",
+  provider: "macos-cgevent" | "linux-evdev" | "activitywatch"
+}
+```
+
+不保存坐标、窗口/应用名、屏幕信息、设备信息、鼠标移动或原始事件序列。第一版只支持
+macOS Core Graphics Event Tap；采集器以原生 helper 运行，Bun 进程负责聚合和原子写入
+`~/.goule/activity/YYYY-MM-DD.json`。权限不足、睡眠或 collector 中断时必须标记
+`coverage: "partial" | "unavailable"`，不能把未采集误报为 0 次点击。
+
+日报中可以展示点击次数，但措辞必须明确它是活动参考，不等于工作时长；未来即使与
+`hands_on` 做融合，也必须先经过真实数据校准并保持可解释。
 
 ---
 
@@ -375,6 +495,8 @@ polish:
 | --- | --- |
 | L1 adapters | 基于**脱敏 fixture**。`scripts/make-fixture.ts` 读真实 session 文件、剥除所有 `content` 字段、保留 type/timestamp/结构骨架 |
 | L2 timeline | 纯算法单测，手工构造 timestamp 序列。必须覆盖：跨午夜块、并行重叠块、零时长块、逻辑日边界裁剪 |
+| L2 真人谓词 | **专项 fixture**：CC 的 `tool_result`（同为 `type: "user"`）、subagent 记录、Codex 的 `developer` role 均须被排除。断言 hands_on 不受 agent 循环长度影响 |
+| L2 stress | 纯算法单测：各信号阈值边界、半衰衰减、基线不足时 `overlong_day` 关闭。**回归断言：本机 36 天样本上 `late_night` 触发 ≤ 2 次**——过度触发即为回归 |
 | L3 git | 在临时目录 `git init` 并造提交，不依赖真实仓库 |
 | L4 join | 组合测试，重点覆盖 `exact` / `heuristic` 两档与孤儿桶 |
 | L5 render | Markdown 快照测试 |
@@ -392,7 +514,8 @@ polish:
 | --- | --- |
 | P1-M0 | 类型定义（`DayFacts` / `RawSession`）+ 脱敏 fixture 脚本 + CI |
 | P1-M1 | L1 两个 adapter（含 CC subagent 递归发现），通过 fixture 测试；先朴素实现，再落 §6.4 优化 |
-| P1-M2 | L2 timeline（切块 / 并集 / 逻辑日），含全部边界用例 |
+| P1-M2 | L2 timeline（真人锚点切块 / 并集 / 逻辑日 / hands_on-agent 拆分），含全部边界用例 |
+| P1-M2b | 压力信号与压力债计算（§5.2），含个人基线冷启动 |
 | P1-M3 | L3 git 扫描 + L4 join，产出完整 `DayFacts` |
 | P1-M4 | L5 render + `goule report/scan/notes`，事实层可用 |
 | P1-M5 | L6 polish（可选层）+ `--dry-run` + 隐私断言 |
@@ -406,7 +529,7 @@ M4 即为首期的可用交付点；M5 为增强。
 | 阶段 | 一句话 | 核心交付 | 依赖 |
 | --- | --- | --- | --- |
 | **Phase 1** | 事实采集与关联 | `DayFacts` + 事实层日报 | — |
-| **Phase 2** | 行为反思 + 产能判定 | `ReflectionReport` + `Verdict` + `goule check` | Phase 1 管道 + 可选本地 LLM |
+| **Phase 2** | 行为反思 + 产能判定 | `ReflectionReport` + `Verdict`（含压力债门槛折扣）+ `goule check` | Phase 1 管道 + 可选本地 LLM |
 | **Phase 3** | 协作上下文补全 | 飞书聊天总结 + 三源 join 日报 | Phase 1 + 用户 OAuth |
 
 Phase 1 的 `DayFacts` 契约在各阶段**只增不改**——新阶段通过扩展字段或并列契约追加能力，不回写 Phase 1 语义。
@@ -526,7 +649,17 @@ goule reflect [--date today] [--dry-run]        # 仅输出 ReflectionReport JSO
 
 ### 13.4 规则引擎（与反思层并列）
 
-Phase 2 同步引入 PRD F2，输入仍为 `DayFacts`（+ 可选 `ReflectionFacts.signals` 作高级规则，默认规则包不依赖 LLM）：
+Phase 2 同步引入 PRD F2，输入仍为 `DayFacts`（+ 可选 `ReflectionFacts.signals` 作高级规则，默认规则包不依赖 LLM）。`DayFacts` 作为规则输入无需改动——这是把它定为核心契约的原因。压力债的消费方式（§5.2）在此落地：
+
+```
+今日门槛 = 基准门槛 × (1 − min(max_discount, debt))
+```
+
+`max_discount` 默认 **0.5**，封顶是必需的——否则机制退化为「压力大就什么都不用干」。
+
+该机制**无法被滥用来逃避工作**：取得折扣的唯一途径是真的透支（熬夜、连续无休、恢复不足），而透支的代价远大于「明天少干一点」的收益。且产品目标本就是让用户更早下班，朝这个方向 game 不构成滥用，是产品在正常工作。
+
+届时同步引入：
 
 - `~/.goule/snapshots/YYYY-MM-DD.json` 冻结层（规则可变，结论不再可重建）
 - `goule check` → `Verdict { GO | CAUTION | NO_GO, score, reasons[], gap[] }`

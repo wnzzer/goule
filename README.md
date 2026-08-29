@@ -2,11 +2,38 @@
 
 > **Enough, clock out.**
 
-本地优先的「今日工作核验 + 日报双模」工具：读取 Git 与可选行为数据，按你自己定义的规则告诉你**够了没有**，并生成可复制的证据页。
+本地优先的「今日工作核验 + 日报双模」工具：读取 Git 与 AI 编码 session，按你自己定义的规则告诉你**够了没有**，并生成可复制的证据页。
 
 ## 状态
 
-🚧 Proposal / Spec-First：产品方向已冻结，MVP 正在拆解实现。
+🚧 **Phase 1 设计已冻结，实现中。**
+
+首期做**事实层**：读取本机 Claude Code 与 Codex 的 session 元数据、结合本地 Git 提交，产出一份「今天干了什么」的结构化日报，并计算压力信号。**首期不做判定**——没有红绿灯、没有分数、没有规则引擎。
+
+设计文档：[Phase 1 设计](docs/superpowers/specs/2026-08-29-goule-phase1-design.md) · [产品需求文档](docs/PRD.md)
+
+## 为什么先做这个
+
+`git-standup` 给你 commit 列表，`worklog` 给你时长，但没有工具能告诉你：
+
+> 在 `acme-api/master` 上，2 个 AI session（164 min）产出了 5 个 commit。
+
+把 AI session 和 Git 提交**关联起来**，是首期唯一不可替代的输出。而规则引擎的价值取决于阈值定得准不准，阈值需要真实数据来标定——所以数据管道先于规则引擎。
+
+### 工时口径：`hands_on` 而非「有记录」
+
+在 agent 编码时代，「session 开着」和「人在工作」是两回事。实测本机数据：**真人输入只占全部 session 记录的 8.9%**，若把所有记录当活跃信号，30 天工时会虚高 **63%**，最坏单日虚高 **7.3 倍**（一个跨 13 天、466 MB 的 rollout 文件独自贡献了 18.7 小时的虚假工时）。
+
+Goule 因此把两个量分开，且**永不相加**：
+
+- `hands_on_minutes` —— 真人输入锚定，**唯一工时口径**，「够了没」与压力分析只用它
+- `agent_minutes` —— agent 自主运行时长，是产出杠杆的证据，不是工时
+
+### 压力降低「够了」的门槛
+
+压力分析**不出独立分数**。一个说「你压力 78 分」却不给动作的数字，只会变成又一个自我鞭挞的指标。Goule 让压力成为**下班的理由**：昨夜熬到 01:20、已连续 6 天无休 → 今天「够了」的门槛自动下调，结论写成「你昨天透支了，今天这些就够了」。
+
+信号锚定 hands_on（agent 跑一整夜不会让人疲劳），基线用**你自己的历史 P90** 而非硬编码工时。
 
 ## 核心原则
 
@@ -15,6 +42,7 @@
 - **Rules you own**：规则由用户拥有和配置，不硬编码“996 标准”。
 - **Dual face**：同一份数据支持收工核验和日报输出。
 - **No keylogger**：不记录源码、按键内容或 IM 正文。
+- **事实层独立成立**：LLM 润色是叠加层而非替代层，生成内容在输出中必须可区分。
 
 ## 快速开始（开发中）
 
@@ -22,10 +50,39 @@
 
 ```bash
 bun install
-bun run dev -- check
+bun run dev -- report
 ```
 
-当前骨架提供安全的 CLI 入口；Git 扫描、SQLite、规则引擎和 Dashboard 将按 `docs/PRD.md` 逐步实现。
+当前 `goule scan` / `goule report` 已可输出事实层日报：包括 AI session、Git commit 统计、
+session↔commit 关联和未关联项；`notes`、LLM 润色及规则判定仍按上述设计文档逐步实现。
+
+### 鼠标点击活动（可选）
+
+鼠标点击统计默认关闭。显式启动后，Goule 只保存按逻辑日和本地小时聚合的点击次数，
+不保存坐标、窗口名、应用名、设备信息或原始事件：
+
+```bash
+goule activity start     # 前台运行，Ctrl-C 停止
+goule activity status
+goule activity stop
+```
+
+macOS 首次启动需要给运行 Goule 的终端或 helper 授予“辅助功能”权限；没有权限时采集器
+会退出并提示原因。点击次数会作为独立活动证据出现在 `activity.mouseClicks`，不会并入
+`handsOn.minutes`、压力信号或任何“工作时长”计算。
+
+## 数据来源
+
+| 来源 | 采集内容 | 状态 |
+| --- | --- | --- |
+| Claude Code | session 元数据：时间戳、cwd、分支、标题、token（含 subagent） | Phase 1 |
+| Codex | session 元数据：时间戳、cwd、分支、起始 commit、token | Phase 1 |
+| 本地 Git | commit 元数据、增删行数、Conventional Commits 分类 | Phase 1 |
+| 鼠标点击 | 逻辑日/小时聚合的点击次数（可选、本地） | macOS MVP |
+| Cursor | — | 未排期（`state.vscdb` 为未公开 schema） |
+| ActivityWatch / 飞书 | — | Phase 3 |
+
+**不采集**：对话正文、源码内容、完整 diff、按键内容。
 
 ## 品牌文案
 
@@ -35,13 +92,16 @@ bun run dev -- check
 | `CAUTION` | **差不多，你说了算** |
 | `NO_GO` | **证据还差点，再补一块** |
 
+> Verdict 属于 Phase 2。首期只呈现事实，不下结论。
+
 ## 规划
 
-- v0.1：本地 Git、多 repo、SQLite、规则引擎、`check`、日报、Dashboard
-- v0.2：ActivityWatch、飞书元数据、可选 AI 日报润色、规则市场
-- v0.3：Agent session 导入、周报、定时提醒
+- **Phase 1（当前）**：Claude Code / Codex session + 本地 Git → 结构化日报；hands_on / agent 工时拆分；压力信号计算；可选 LLM 润色层
+- **Phase 2**：规则引擎、产能分、`check`、**压力债 → 门槛折扣**、快照层、规则包与首周校准
+- **Phase 3**：本地 Dashboard、ActivityWatch、飞书元数据、规则市场
+- **后续**：Cursor 接入、周报聚合、定时提醒
 
-详见 [产品需求文档](docs/PRD.md)。
+> 该排期主动重排了 PRD v0.2 的原顺序，理由见[设计文档 §1.1](docs/superpowers/specs/2026-08-29-goule-phase1-design.md)。
 
 ## 开源协议
 

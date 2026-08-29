@@ -8,8 +8,9 @@
   },
   "scripts": {
     "dev": "bun run src/index.ts",
-    "check": "bun run src/index.ts check",
-    "typecheck": "bunx tsc --noEmit"
+    "report": "bun run src/index.ts report",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
   },
   "engines": {
     "bun": ">=1.1.0"
