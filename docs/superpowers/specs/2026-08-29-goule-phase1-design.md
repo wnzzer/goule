@@ -421,7 +421,8 @@ goule doctor                       # 数据源可达性诊断（P1）
 ```
 ~/.goule/
   config.yaml                  # 见下
-  notes/YYYY-MM-DD.json        # 唯一持久化数据
+  notes/YYYY-MM-DD.json        # 用户笔记
+  activity/YYYY-MM-DD.json     # 可选鼠标活动聚合（无原始事件）
 ```
 
 ```yaml
@@ -432,6 +433,10 @@ timezone: auto                 # 或 IANA 名
 sources:
   claude_code: { enabled: true, root: ~/.claude/projects }
   codex:       { enabled: true, root: ~/.codex/sessions }
+mouse:
+  enabled: false
+  provider: auto
+  persist: true
 git:
   repos: ["~/work", "~/projects"]   # 递归扫描根
   author: auto                              # 取 git config user.email
@@ -453,6 +458,32 @@ polish:
 ```
 
 `~/.goule` 可整体删除，无残留。
+
+### 9.1 鼠标点击活动（可选扩展）
+
+鼠标点击作为独立的活动证据接入，不改变 `hands_on` 的真人 session 锚定口径，也不直接
+参与压力信号或规则判定。默认关闭，用户显式执行 `goule activity start` 后才开始采集。
+
+内部事件只保留 `{ at: Instant }`；持久化只保存按逻辑日和本地小时聚合的结果：
+
+```jsonc
+activity.mouse_clicks {
+  enabled: boolean,
+  clicks: number,
+  by_hour: number[24],
+  observed_minutes: number,
+  coverage: "complete" | "partial" | "unavailable",
+  provider: "macos-cgevent" | "linux-evdev" | "activitywatch"
+}
+```
+
+不保存坐标、窗口/应用名、屏幕信息、设备信息、鼠标移动或原始事件序列。第一版只支持
+macOS Core Graphics Event Tap；采集器以原生 helper 运行，Bun 进程负责聚合和原子写入
+`~/.goule/activity/YYYY-MM-DD.json`。权限不足、睡眠或 collector 中断时必须标记
+`coverage: "partial" | "unavailable"`，不能把未采集误报为 0 次点击。
+
+日报中可以展示点击次数，但措辞必须明确它是活动参考，不等于工作时长；未来即使与
+`hands_on` 做融合，也必须先经过真实数据校准并保持可解释。
 
 ---
 

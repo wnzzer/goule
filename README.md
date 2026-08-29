@@ -55,6 +55,21 @@ bun run dev -- report
 
 当前为 CLI 骨架。Phase 1 的数据采集、时间轴与日报渲染按上述设计文档逐步实现。
 
+### 鼠标点击活动（可选）
+
+鼠标点击统计默认关闭。显式启动后，Goule 只保存按逻辑日和本地小时聚合的点击次数，
+不保存坐标、窗口名、应用名、设备信息或原始事件：
+
+```bash
+goule activity start     # 前台运行，Ctrl-C 停止
+goule activity status
+goule activity stop
+```
+
+macOS 首次启动需要给运行 Goule 的终端或 helper 授予“辅助功能”权限；没有权限时采集器
+会退出并提示原因。点击次数会作为独立活动证据出现在 `activity.mouseClicks`，不会并入
+`handsOn.minutes`、压力信号或任何“工作时长”计算。
+
 ## 数据来源
 
 | 来源 | 采集内容 | 状态 |
@@ -62,6 +77,7 @@ bun run dev -- report
 | Claude Code | session 元数据：时间戳、cwd、分支、标题、token（含 subagent） | Phase 1 |
 | Codex | session 元数据：时间戳、cwd、分支、起始 commit、token | Phase 1 |
 | 本地 Git | commit 元数据、增删行数、Conventional Commits 分类 | Phase 1 |
+| 鼠标点击 | 逻辑日/小时聚合的点击次数（可选、本地） | macOS MVP |
 | Cursor | — | 未排期（`state.vscdb` 为未公开 schema） |
 | ActivityWatch / 飞书 | — | Phase 3 |
 

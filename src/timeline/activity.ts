@@ -1,5 +1,7 @@
 import type { DayRange } from '../types/day'
 import { MINUTE_MS, type Tz } from '../types/instant'
+import { emptyMouseActivity } from '../mouse/aggregate'
+import type { MouseActivity } from '../mouse/types'
 import { agentTimes, humanTimes, type RawSession, type ToolId } from '../types/session'
 import { toBlocks, type Block } from './blocks'
 import { byHour, clipTo, totalMinutes, union } from './union'
@@ -25,6 +27,7 @@ export interface AgentActivity {
 export interface Activity {
   handsOn: HandsOn
   agent: AgentActivity
+  mouseClicks: MouseActivity
 }
 
 function collect(
@@ -49,6 +52,7 @@ export function buildActivity(
   sessions: RawSession[],
   range: DayRange,
   cfg: ActivityConfig,
+  mouseClicks: MouseActivity = emptyMouseActivity(),
 ): Activity {
   const handsOnBlocks = collect(sessions, humanTimes, range, cfg)
   const allBlocks = collect(sessions, agentTimes, range, cfg)
@@ -69,5 +73,6 @@ export function buildActivity(
       blocks: allBlocks,
       minutes: Math.max(0, allMinutes - handsOnMinutes),
     },
+    mouseClicks,
   }
 }

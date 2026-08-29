@@ -14,6 +14,13 @@ export interface StressConfig {
   baselineMinDays: number
 }
 
+export interface MouseConfig {
+  /** 默认关闭；显式执行 `goule activity start` 才会启动采集。 */
+  enabled: boolean
+  provider: 'auto' | 'macos-cgevent' | 'linux-evdev' | 'activitywatch'
+  persist: boolean
+}
+
 export interface Config {
   dayCutoffHour: number
   idleGapMinutes: number
@@ -23,6 +30,7 @@ export interface Config {
     claudeCode: { enabled: boolean; root: string }
     codex: { enabled: boolean; root: string }
   }
+  mouse: MouseConfig
   stress: StressConfig
 }
 
@@ -34,6 +42,11 @@ export const DEFAULT_CONFIG: Config = {
   sources: {
     claudeCode: { enabled: true, root: join(homedir(), '.claude', 'projects') },
     codex: { enabled: true, root: join(homedir(), '.codex', 'sessions') },
+  },
+  mouse: {
+    enabled: false,
+    provider: 'auto',
+    persist: true,
   },
   stress: {
     halfLifeDays: 3,
@@ -49,6 +62,7 @@ export const DEFAULT_CONFIG: Config = {
 }
 
 export function resolveTz(timezone: string): Tz {
+  if (process.env.GOULE_TZ) return process.env.GOULE_TZ
   if (timezone === 'auto') return Intl.DateTimeFormat().resolvedOptions().timeZone
   return timezone
 }
