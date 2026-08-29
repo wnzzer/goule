@@ -1,0 +1,12 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g opacity="0.14">
+    <path d="M134 260A122 122 0 0 0 378 260" stroke="#7FC4F5" stroke-width="22"/>
+    <path d="M178 260A78 78 0 0 0 334 260" stroke="#7FC4F5" stroke-width="22"/>
+    <path d="M211 260A45 45 0 0 0 301 260Z" fill="#7FC4F5"/>
+  </g>
+  <line x1="96" y1="260" x2="396" y2="260" stroke="#93A0AD" stroke-opacity="0.65" stroke-width="7" stroke-linecap="round"/>
+  <path d="M134 260A122 122 0 0 1 378 260" stroke="#7FC4F5" stroke-width="22"/>
+  <path d="M178 260A78 78 0 0 1 334 260" stroke="#7FC4F5" stroke-width="22"/>
+  <path d="M211 260A45 45 0 0 1 301 260Z" fill="#7FC4F5"/>
+  <path d="M416 240L436 260L416 280L396 260Z" fill="#62D6A7"/>
+</svg>

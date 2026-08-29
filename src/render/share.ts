@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DayFactsLite } from '../scan'
 import { summarizeBusinessChanges } from './business'
+import { gouleIconGroup } from './icon'
 import { dayFactsMouse, escapeXml, formatCompactMinutes, hourMax, hourValues } from './view'
 
 const SHARE_FONT_FILES = [
@@ -80,10 +81,9 @@ export function renderShareSvg(facts: DayFactsLite): string {
 <rect x="32" y="28" width="8" height="844" rx="4" fill="#0a8f6a"/>
 
 <g transform="translate(72 70)">
-  <rect width="40" height="40" rx="11" fill="#0a8f6a"/>
-  <text x="20" y="28" text-anchor="middle" class="mark">G</text>
-  <text x="56" y="18" class="brand">Goule</text>
-  <text x="56" y="35" class="eyebrow">DAILY WORK SUMMARY</text>
+  ${gouleIconGroup(0, -4, 54)}
+  <text x="68" y="18" class="brand">Goule</text>
+  <text x="68" y="35" class="eyebrow">DAILY WORK SUMMARY</text>
 </g>
 <rect x="938" y="74" width="172" height="36" rx="18" fill="#eaf7f1"/>
 <circle cx="962" cy="92" r="5" fill="#0a8f6a"/>

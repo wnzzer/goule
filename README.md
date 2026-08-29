@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon-128.png" width="128" height="128" alt="Goule icon">
+</p>
+
 # 够了·到点下班（Goule）
 
 > **Enough, clock out.**

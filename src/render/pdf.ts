@@ -21,6 +21,8 @@ function findFont(): string | null {
   return FONT_CANDIDATES.find((path) => existsSync(path)) ?? null
 }
 
+const ICON_PATH = join(import.meta.dir, '../../assets/icon.png')
+
 function textValue(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim()
 }
@@ -52,6 +54,7 @@ export async function renderPdfReport(facts: DayFactsLite): Promise<Uint8Array> 
   doc.on('data', (chunk: Buffer) => chunks.push(new Uint8Array(chunk)))
 
   doc.roundedRect(42, 42, 511, 118, 18).fill('#263a8e')
+  if (existsSync(ICON_PATH)) doc.image(ICON_PATH, 465, 65, { width: 72 })
   doc.fillColor('#dce3ff').fontSize(8).text('GOULE · ENOUGH, CLOCK OUT', 62, 64)
   doc.fillColor('#ffffff').fontSize(25).text(`${facts.dayId} 工作日报`, 62, 82)
   doc.fillColor('#dce3ff').fontSize(10).text(`今天完成 ${facts.git.totals.commits} 项变更`, 62, 119)
