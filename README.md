@@ -2,6 +2,16 @@
 
 > **Enough, clock out.**
 
+## 截图
+
+Goule 把「今天够不够下班」建立在可核验的工作证据上：
+
+![今日核验：够了，今天可以收工](docs/screenshots/overview.png)
+
+![证据面板：AI session、token 与压力信号](docs/screenshots/evidence.png)
+
+![日报：今天做了什么，以及为什么可以停](docs/screenshots/daily-report.png)
+
 本地优先的「今日工作核验 + 日报双模」工具：读取 Git 与 AI 编码 session，按你自己定义的规则告诉你**够了没有**，并生成可复制的证据页。
 
 ## 状态
