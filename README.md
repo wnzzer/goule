@@ -53,7 +53,8 @@ bun install
 bun run dev -- report
 ```
 
-当前为 CLI 骨架。Phase 1 的数据采集、时间轴与日报渲染按上述设计文档逐步实现。
+当前 `goule scan` / `goule report` 已可输出事实层日报：包括 AI session、Git commit 统计、
+session↔commit 关联和未关联项；`notes`、LLM 润色及规则判定仍按上述设计文档逐步实现。
 
 ### 鼠标点击活动（可选）
 
