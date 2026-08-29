@@ -1,0 +1,410 @@
+# Goule 首期设计：AI Session 总结 + Git 总结
+
+> 文档版本：v1.0
+> 日期：2026-08-29
+> 阶段：Phase 1 设计（已评审冻结项见 §3）
+> 上游：`docs/PRD.md` v0.2
+
+---
+
+## 1. 首期范围
+
+一句话：**读取本机 Claude Code 与 Codex 的 session 元数据、结合本地 Git 提交，产出一份「今天干了什么」的结构化日报**。
+
+首期**不做判定**。没有红绿灯、没有分数、没有规则引擎。只做事实的采集、关联与呈现。
+
+### 1.1 与 PRD 的偏离（需知悉）
+
+PRD v0.2 把 session 导入排在 v0.3、AI 总结排在 v0.2，而把规则引擎与 Dashboard 放进 v0.1 MVP。本期**主动重排**了这个顺序：
+
+| PRD 原排期 | 本期决定 | 理由 |
+| --- | --- | --- |
+| v0.1：Git + SQLite + 规则引擎 + Dashboard | 推迟 | 规则引擎的价值取决于「阈值定得准不准」，而阈值需要真实数据来标定。先有数据管道，规则才有依据 |
+| v0.3：Claude/Cursor session 导入 | **提前到首期** | 本机实测 CC 189 + Codex 255 个 session，是比 Git 更完整的工作证据；且 session↔commit 的关联是竞品都没有的差异化 |
+| v0.2：AI 日报润色 | **提前到首期（可选层）** | 实测 Codex session 无标题、CC 也有缺失，润色层的真实职责是「补缺失标题」而非「改写得好听」 |
+
+PRD 的原则不变：Local-first、Evidence over vibe、No keylogger、不读源码送 LLM。本期新增一条落地规则见 §8。
+
+### 1.2 明确不做
+
+- 规则引擎、verdict、产能分（Phase 2）
+- Web Dashboard、SQLite（Phase 2 及以后）
+- Cursor（`state.vscdb` 为未公开 schema，随版本碎；成本高一档）
+- 飞书元数据、ActivityWatch（维持 PRD 排期）
+- 任何形式的云端、账号、遥测
+
+---
+
+## 2. 实测基线（2026-08-29，本机）
+
+设计中的每个数值均来自实测。测量口径：逻辑日 `2026-08-28`（跨 8/28–8/29 两个自然日）。
+
+| 观测 | 数值 | 对设计的影响 |
+| --- | --- | --- |
+| 候选文件总数 | **438** = CC 顶层 102 + CC subagent 85 + Codex 251 | subagent 占 CC 文件的 45%，`discover` 必须递归 |
+| mtime 预过滤命中 | 438 → **25** 个文件（2 ms） | 预过滤是性能的第一来源 |
+| 当日数据量 | **283 MB / 39277 条记录** | 绝大部分是对话正文与代码，而我们只需元数据 |
+| 全量 `JSON.parse` 耗时 | **1073 ms** | 朴素解析可行但浪费 27 倍 |
+| 流式正则 + 选择性解析 | **124 ms**（8.7x） | 采纳为 L1 实现策略，见 §6.4 |
+| 记录间隔 P50 / P99 | 0.1 s / 72.8 s | 活跃时记录极密，idle 阈值有充足余量 |
+| 裸 span 合计 | 4453 h（含单个 1038 h 的 session） | first→last 完全不可用作时长 |
+| 活跃时长 / 裸 span | 4%–9%（阈值 2–60 min 区间） | 阈值不敏感，不值得投入调参 |
+| 并行 session 双重计时 | 817 → 776 min，虚高 5% | 必须做区间并集（正确性问题） |
+| 跨午夜工作块 | 存在 448 min 块，17:52 → 次日 01:20 | 必须引入逻辑日边界 |
+| 零时长块占比 | 19 块中 7 块为 0 min | 需要最小块信用 |
+
+> 记录：早期一次测量得出「40 ms」，系因当时仅扫描 8/29 单日（数据尚薄）且 glob 未递归、漏掉全部 subagent 文件。上表为修正后的口径。
+
+## 3. 已冻结决策
+
+| # | 议题 | 决策 |
+| --- | --- | --- |
+| 1 | 首期目标 | AI session 总结 + Git 总结，不做 verdict |
+| 2 | 数据源 | Claude Code + Codex，不含 Cursor |
+| 3 | 总结生成方式 | 两层：事实层（无 LLM）+ 可选润色层 |
+| 4 | 存储架构 | **无状态现扫**；仅持久化用户笔记 |
+| 5 | adapter 接口 | 取字段**并集** + 可空，不取交集 |
+| 6 | 逻辑日边界 | `day_cutoff_hour` 默认 04:00 本地时间 |
+| 7 | idle 阈值 | `idle_gap_minutes` 默认 10 |
+
+### 3.1 为何不上 SQLite
+
+SQLite 唯一不可替代的价值是存储**无法从源头重建的数据**。首期的数据全部可重建：session 文件与 Git 历史都不可变，今天扫和下个月扫结果一致。124 ms 的扫描成本也不构成缓存动机。
+
+唯一不可重建的是用户手写的笔记（明日计划、阻塞项），用单个 JSON 文件即可。
+
+升级触发条件是明确的：**当规则引擎引入、且规则本身会随时间修改时**，「用当时的规则算出的当时的结论」第一次变得无法重建。那时引入快照层（`~/.goule/snapshots/`），若跨天聚合出现性能问题再升 SQLite。在此之前提前建表属于为未写的代码预留结构。
+
+---
+
+## 4. 逻辑日与活跃块
+
+### 4.1 逻辑日
+
+```
+day_id "2026-08-28"  ≡  [2026-08-28 04:00, 2026-08-29 04:00)  本地时区
+```
+
+`day_cutoff_hour` 默认 `4`，可配置为 `0` 恢复自然日。
+
+依据：实测存在 17:52 干到次日 01:20 的连续 448 分钟工作块。按自然日切会把它腰斩，使「今天」的统计从根上失真。程序员的一天不在午夜结束，把这个领域事实编码进模型，而不是让用户自己脑补。
+
+跨边界的块按边界**裁剪**，两侧各计各的，不整块归属。
+
+### 4.2 时区
+
+- session timestamp 为 UTC（形如 `2026-08-29T01:36:35.902Z`）
+- git timestamp 带本地 offset
+- **内部一律存 UTC instant**，仅在切日与展示时转本地时区
+- 时区取系统时区，可用 `GOULE_TZ` 覆盖
+
+此处是最易埋雷的位置，类型层面区分 `Instant`（UTC 瞬时）与 `LocalDateTime`，禁止隐式转换。
+
+### 4.3 切块算法
+
+```
+输入：RawSession[]
+1. 每个 session 内，按 events[].at 排序
+2. 相邻间隔 > idle_gap_minutes(10) 则断开 → 得到该 session 的块
+3. 块时长 = last - first；若为 0，计 min_block_credit(60s)
+4. 收集所有 session 的所有块，跨工具做区间并集(interval union)
+5. 按逻辑日边界裁剪
+6. active_minutes = 并集后各块时长之和
+```
+
+- **步骤 2 按文件聚合，不按记录**：Codex 的 `session_meta` 仅出现在首行，按记录聚合会碎成大量单记录幽灵 session。
+- **步骤 4 的并集是正确性要求**：并行开多个窗口时，分别求和再相加会虚高（实测 5%）。
+- **步骤 3 的最小信用**：单记录块代表一次真实交互，计 0 不诚实；但也不应让它冒充工作块，故给固定小额信用。
+
+阈值选择：P99 记录间隔为 73 秒，10 分钟有 8 倍余量。实测 2→60 分钟的阈值扫描中结果始终在同一数量级，该参数不敏感，不值得投入调参。
+
+---
+
+## 5. `DayFacts` 数据契约
+
+`DayFacts` 是首期的核心契约，同时承担三个角色：事实层的输出、润色层的**唯一**输入、未来规则引擎的输入。
+
+```jsonc
+DayFacts {
+  schema_version: 1,
+  day_id: "2026-08-28",
+  boundary: { start: Instant, end: Instant, cutoff_hour: 4, tz: "Asia/Shanghai" },
+  generated_at: Instant,
+
+  activity: {
+    blocks: [{ start: Instant, end: Instant, minutes: number,
+               sources: ToolId[] }],        // 已做区间并集
+    active_minutes: number,
+    by_hour: number[24]                     // 分钟/小时，供热力条
+  },
+
+  ai: {
+    sessions: [{
+      id: string,
+      tool: "claude-code" | "codex",
+      title: string | null,                 // CC 的 aiTitle；缺失为 null
+      repo: string | null,                  // 由 cwd 解析
+      branch: string | null,
+      cwd: string | null,
+      minutes: number,
+      blocks: [{ start, end, minutes }],    // 本 session 自己的块，未并集
+      turns: { user: number, assistant: number },
+      models: string[],
+      tokens: { in, out, cache_read } | null,
+      is_sidechain: boolean,                // subagent
+      parent_session_id: string | null      // subagent 指向父 session
+    }],
+    totals: { sessions, minutes, user_turns, tokens }
+  },
+
+  git: {
+    repos: [{
+      path: string, name: string, branch: string,
+      commits: [{
+        sha, ts: Instant, subject: string,
+        type: string | null, scope: string | null,   // Conventional Commits 前缀
+        files: number, insertions: number, deletions: number,
+        is_merge: boolean
+      }]
+    }],
+    totals: { commits, files, insertions, deletions, repos }
+  },
+
+  joined: [{
+    repo: string, branch: string | null, minutes: number,
+    session_ids: string[], commit_shas: string[],
+    confidence: "exact" | "heuristic"
+  }],
+
+  unattributed: {
+    sessions: SessionRef[],   // cwd 不在任何已知 repo 内
+    commits:  CommitRef[]     // 时间上无 session 覆盖（IDE 内直接提交等）
+  },
+
+  notes: { tomorrow: string, blockers: string }
+}
+```
+
+### 5.1 三个设计要点
+
+**`title: null` 是显式建模。** 实测 Codex 全部无标题、CC 亦有缺失。若用空串或兜底文案填充，润色层就无法知道该补哪几个。把缺失如实建模，是两层方案的价值落点。
+
+**`unattributed` 是一等公民。** 实测存在 `cwd=$HOME`、`branch=HEAD` 的 session，无法关联任何 repo。静默丢弃是这类工具最主要的失信来源——用户确实干了活，工具却说没有。宁可显示「3 个 session 未能关联到 repo」也不假装它们不存在。
+
+**`joined` 是首期唯一不可替代的输出。** git-standup 给 commit 列表，worklog 给时长，没有工具能给出「在 `acme-api/master` 上，2 个 AI session（164 min）产出了 5 个 commit」。首期若只交付一样东西，是这个。
+
+---
+
+## 6. 模块边界
+
+```
+L1  adapters/{claude-code,codex}   →  RawSession[]       纯解析，零业务判断
+L2  timeline/                      →  ActivityBlock[]    切块 + 并集 + 逻辑日
+L3  git/                           →  RepoDay[]          git log + CC 前缀分类
+L4  join/                          →  DayFacts           关联 + 孤儿桶
+L5  render/                        →  Markdown           事实层输出
+L6  polish/                        →  Markdown           可选，唯一触网的层
+```
+
+单向依赖，每层只依赖下游的**类型**而非实现。L1–L4 为纯函数：不读时钟、不触网、不依赖全局状态，输入确定则输出确定。
+
+### 6.1 adapter 接口
+
+```ts
+interface SessionAdapter {
+  readonly tool: ToolId
+  discover(range: DayRange): Promise<Candidate[]>   // mtime/路径预过滤
+  parse(c: Candidate): Promise<RawSession>
+}
+
+interface RawSession {
+  id: string
+  tool: ToolId
+  file: string
+  events: { at: Instant; kind: 'user' | 'assistant' | 'meta' | 'other' }[]
+  cwd: string | null
+  git: { branch: string | null
+         commitHash: string | null
+         remoteUrl: string | null } | null
+  title: string | null
+  models: string[]
+  tokens: TokenUsage | null
+  turns: { user: number; assistant: number }
+}
+```
+
+**接口取并集而非交集。** 若取最小公共子集，`aiTitle`（CC 独有）与 `commitHash`（Codex 独有）都会被砍掉，接口看似干净，但每接入一个新工具信息就少一分。取并集 + 字段可空，每个 adapter 尽力提供、消费方显式处理缺失，能力只增不减。
+
+各工具实际能力：
+
+| 字段 | Claude Code | Codex |
+| --- | --- | --- |
+| cwd | 每条记录 | `session_meta.cwd` |
+| branch | 每条记录 `gitBranch` | `session_meta.git.branch` |
+| commitHash | 无 | `session_meta.git.commit_hash` |
+| remoteUrl | 无 | `session_meta.git.repository_url` |
+| title | `ai-title` 记录的 `aiTitle` | 无 |
+| tokens | `message.usage` | `event_msg.token_count` |
+| subagent | 独立文件 + `isSidechain` / `agentId` / 父 `sessionId` | 无（未观测到） |
+
+### 6.2 join 的两档精度
+
+精度差异显式声明，不静默降级：
+
+| 条件 | 策略 | `confidence` |
+| --- | --- | --- |
+| 有 `commitHash`（Codex） | 以 `commitHash..HEAD` 的 rev range 归属提交 | `exact` |
+| 仅有 branch（CC） | `(repo, branch, 时间窗重叠)` 启发式 | `heuristic` |
+
+### 6.3 `discover` 的预过滤
+
+性能的第一来源（438 → 25 文件，2 ms）。规则：
+
+- **Claude Code**：`~/.claude/projects/**/*.jsonl`（**必须递归**）
+  - 顶层 `<project>/<uuid>.jsonl` 为主 session
+  - `<project>/<uuid>/subagents/agent-*.jsonl` 为 subagent，实测占 85/187 = 45%。两层 glob 会静默漏掉近半数文件
+  - subagent 记录含 `isSidechain: true`、`agentId`，其 `sessionId` 即父 session id
+- **Codex**：`~/.codex/sessions/YYYY/MM/DD/*.jsonl`
+  - 先按目录日期筛（覆盖逻辑日跨越的 2 个自然日），再按 mtime 复筛
+  - `~/.codex/` 根目录下的 `history.jsonl`、`session_index.jsonl`、`transcription-history.jsonl` **不是** session 文件，四层 glob 天然排除，勿改用递归
+  - `session_index.jsonl` 实测仅 16 行 vs 251 个 session 文件，索引不完整，**不可用于 discover**
+
+mtime 窗口左侧放宽 1 天，避免逻辑日 04:00 边界与跨午夜 session 造成漏扫。预过滤只用于缩小候选集，最终归属一律以记录内 timestamp 为准。
+
+**subagent 的时间块必然与父 session 重叠**（subagent 在父 session 运行期间执行）。区间并集（§4.3 步骤 4）已正确处理时长；但 `ai.totals.sessions` 计数时须排除 `is_sidechain: true` 的条目，否则 session 数虚高。
+
+### 6.4 解析策略
+
+朴素地对 283 MB 逐行 `JSON.parse` 需 1073 ms，且绝大部分开销花在解析我们根本不读的 `message.content`（对话正文与代码）。采用两级策略，实测 **124 ms（8.7x）**：
+
+1. **时间轴**：流式逐行，用正则 `/"timestamp":"(\d{4}-\d\d-\d\dT[^"]{4,32})"/` 提取**每行第一个**匹配，不做 JSON 解析。
+2. **元数据行**：仅当行内匹配 `ai-title` / `session_meta` / `token_count` 时才做完整 `JSON.parse`。实测当日仅 4914 行需要（占 12.5%）。
+
+准确性实测：
+
+| 策略 | 相对真值 |
+| --- | --- |
+| 取每行**第一个**匹配 | **100.00%**（37726/37726） |
+| 取每行最后一个匹配 | 99.97% |
+
+正则整体召回 100%，但存在 0.26% 假阳性——出现在**本身没有 timestamp 字段**的记录（`ai-title` / `mode` / `last-prompt` 等）中，其正文恰好包含形如 `"timestamp":"..."` 的字符串。防护：提取到的时间戳须落在 `[文件 mtime - 30d, now]` 内，否则丢弃。这些记录本就不参与时间轴，影响可忽略。
+
+此优化只影响 L1 的**实现**，不改变其接口与输出，故可在 M1 先以朴素 `JSON.parse` 实现、测试通过后再替换，由同一组 fixture 测试保证等价。
+
+## 7. CLI
+
+首期命令面：
+
+```bash
+goule report [--date today] [--format md|json] [--polish] [--dry-run]
+goule scan   [--date today]        # 输出原始 DayFacts JSON，供调试与管道
+goule notes  [--date today]        # 用 $EDITOR 打开当日笔记
+goule doctor                       # 数据源可达性诊断（P1）
+```
+
+两个待评审确认的口子，本文档按下述倾向写入：
+
+- **`check` 首期不实现。** 首期无规则引擎，`check` 只能是空壳；保留它会让用户误以为存在判定能力。`--help` 中标注为 Phase 2。品牌核心动作在 Phase 2 规则引擎落地时归位。
+- **notes 用 `$EDITOR`。** 明日计划与阻塞项是多行自由文本，命令行参数不合适。落盘为 `~/.goule/notes/YYYY-MM-DD.json`。
+
+`doctor` 定为 P1（可砍）。理由：本产品依赖两个外部工具的私有目录，「装完跑不通」是最可能的首次使用失败模式，而 PRD 的 TTV 指标（10 分钟内首次跑通）直接依赖可诊断性。实现成本约数十行。
+
+---
+
+## 8. 润色层与隐私契约
+
+### 8.1 风险面
+
+`DayFacts` 已不含对话正文（adapter 只提元数据），但仍包含：绝对路径（`/Users/<user>/work/acme-api`）、暴露内部系统的分支名（`feature-<内部系统名>-limit-<中间件名>`）、私有仓库地址（`git@<企业 git 域名>:<org>/acme-api.git`）、以及 commit subject 中可能存在的客户名与工单号。
+
+### 8.2 `PolishInput` 是投影，不是别名
+
+| 档位 | 包含 | LLM 可达质量 |
+| --- | --- | --- |
+| `strict`（默认） | 数字指标、时间块、匿名 repo 别名（`repo-1`） | 仅能生成骨架 |
+| `standard`（需显式开启） | 追加 repo 名、branch 名、commit subject | 可补出可用标题与日报 |
+
+**两档均不发送**：绝对路径、cwd、sha、remoteUrl、token 数、model 名。这些对润色无帮助，纯粹是风险。
+
+### 8.3 两条强制规则
+
+1. **`--dry-run` 打印将发送的完整 payload。** 不以「我们很安全」的承诺代替可验证性；由用户自己看见送了什么。首次切换到 `standard` 时强制走一次该流程并确认。
+2. **LLM 生成内容在输出中必须可区分。** 补出的标题标注 `*`，脚注写明「标 `*` 的条目由模型生成，非事实记录」。否则用户复制进日报的幻觉内容会被当作证据，直接违背 PRD「Evidence over vibe」原则。**事实层输出必须在任何时候都能独立成立**，润色是叠加层，不是替代层。
+
+### 8.4 Provider
+
+`PolishProvider` 为接口，首期默认关闭。两个实现：本地 Ollama、兼容 OpenAI 的 HTTP endpoint。配置于 `~/.goule/config.yaml`。无配置时 `--polish` 报错并提示配置路径，不静默降级。
+
+---
+
+## 9. 配置与数据目录
+
+```
+~/.goule/
+  config.yaml                  # 见下
+  notes/YYYY-MM-DD.json        # 唯一持久化数据
+```
+
+```yaml
+day_cutoff_hour: 4
+idle_gap_minutes: 10
+min_block_credit_seconds: 60
+timezone: auto                 # 或 IANA 名
+sources:
+  claude_code: { enabled: true, root: ~/.claude/projects }
+  codex:       { enabled: true, root: ~/.codex/sessions }
+git:
+  repos: ["~/work", "~/projects"]   # 递归扫描根
+  author: auto                              # 取 git config user.email
+  exclude_merge: true
+polish:
+  enabled: false
+  provider: ollama
+  redaction: strict
+```
+
+`~/.goule` 可整体删除，无残留。
+
+---
+
+## 10. 测试策略
+
+| 层 | 方式 |
+| --- | --- |
+| L1 adapters | 基于**脱敏 fixture**。`scripts/make-fixture.ts` 读真实 session 文件、剥除所有 `content` 字段、保留 type/timestamp/结构骨架 |
+| L2 timeline | 纯算法单测，手工构造 timestamp 序列。必须覆盖：跨午夜块、并行重叠块、零时长块、逻辑日边界裁剪 |
+| L3 git | 在临时目录 `git init` 并造提交，不依赖真实仓库 |
+| L4 join | 组合测试，重点覆盖 `exact` / `heuristic` 两档与孤儿桶 |
+| L5 render | Markdown 快照测试 |
+| L6 polish | provider 打桩；**独立断言 `PolishInput` 不含 §8.2 的禁发字段** |
+
+**脱敏 fixture 脚本本身即是隐私边界的第一道验证**：若剥除全部 `content` 后 L1–L4 测试仍全绿，即证明这四层确实只依赖元数据。这条性质应作为 CI 断言，而非口头约定。
+
+性能回归基线：当日全量扫描 **< 500 ms**（实测 124 ms，留 4 倍余量）。朴素 `JSON.parse` 实现为 1073 ms，超预算，故 §6.4 的解析策略是**功能需求**而非可选优化。
+
+---
+
+## 11. 里程碑
+
+| 阶段 | 交付 |
+| --- | --- |
+| P1-M0 | 类型定义（`DayFacts` / `RawSession`）+ 脱敏 fixture 脚本 + CI |
+| P1-M1 | L1 两个 adapter（含 CC subagent 递归发现），通过 fixture 测试；先朴素实现，再落 §6.4 优化 |
+| P1-M2 | L2 timeline（切块 / 并集 / 逻辑日），含全部边界用例 |
+| P1-M3 | L3 git 扫描 + L4 join，产出完整 `DayFacts` |
+| P1-M4 | L5 render + `goule report/scan/notes`，事实层可用 |
+| P1-M5 | L6 polish（可选层）+ `--dry-run` + 隐私断言 |
+
+M4 即为首期的可用交付点；M5 为增强。
+
+---
+
+## 12. 后续阶段的衔接
+
+Phase 2 引入规则引擎时，`DayFacts` 作为规则输入无需改动——这是把它定为核心契约的原因。届时同步引入：
+
+- `~/.goule/snapshots/YYYY-MM-DD.json` 冻结层（规则可变，结论不再可重建）
+- `goule check` 归位
+- 规则包 YAML 与首周校准向导
+
+Phase 1 实测采集到的真实分布（commit 数、活跃时长、session 数）将直接用于标定 `balanced` 规则包的默认阈值——这正是把数据管道排在规则引擎之前的收益。
