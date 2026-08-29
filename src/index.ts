@@ -83,6 +83,14 @@ async function doctor(): Promise<void> {
   for (const [name, status, root] of rows) {
     console.log(`${name.padEnd(12)}${status.padEnd(26)}${root}`)
   }
+  const git = DEFAULT_CONFIG.git
+  const proc = Bun.spawn(['git', '--version'], { stdout: 'pipe', stderr: 'pipe' })
+  const gitVersion = (await new Response(proc.stdout).text()).trim()
+  const gitOk = (await proc.exited) === 0
+  const author = git.author === 'auto' ? '各仓库 user.email' : git.author
+  console.log(`${'Git'.padEnd(12)}${(gitOk ? `✓ ${gitVersion}` : '✗ 不可用').padEnd(26)}  作者筛选：${author}`)
+  console.log(`${''.padEnd(12)}${'扫描根'.padEnd(24)}  ${git.repos.join(', ') || '（未配置）'}`)
+
   const mouse = activityStatus(DEFAULT_CONFIG)
   console.log('')
   console.log(`鼠标采集    ${mouse.running ? `✓ 运行中（pid ${mouse.pid}）` : '未运行'}`)

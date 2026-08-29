@@ -9,6 +9,7 @@ const base: RawSession = {
     { at: 300, kind: 'human' },
   ],
   cwd: '/repo', git: null, title: null,
+  tokenEvents: [],
   isSidechain: false, parentSessionId: null,
 }
 
