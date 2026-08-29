@@ -13,7 +13,7 @@ function session(id: string, evts: Array<[string, 'human' | 'agent']>): RawSessi
   return {
     id, tool: 'claude-code', file: `/tmp/${id}.jsonl`,
     events: evts.map(([iso, kind]) => ({ at: t(iso), kind })),
-    cwd: null, git: null, title: null, isSidechain: false, parentSessionId: null,
+    cwd: null, git: null, title: null, tokenEvents: [], isSidechain: false, parentSessionId: null,
   }
 }
 

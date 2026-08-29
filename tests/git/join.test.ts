@@ -35,6 +35,7 @@ function session(overrides: Partial<RawSession>): RawSession {
     id: 'session',
     tool: 'codex',
     file: '/tmp/session.jsonl',
+    tokenEvents: [],
     events: [
       { at: Date.parse('2026-08-29T09:00:00Z'), kind: 'human' },
       { at: Date.parse('2026-08-29T10:00:00Z'), kind: 'agent' },
