@@ -29,6 +29,21 @@ function shorten(value: unknown, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
+const actionLabel: Record<string, string> = {
+  feat: '新增',
+  fix: '修复',
+  refactor: '重构',
+  perf: '优化',
+  docs: '补充文档',
+  test: '补充测试',
+  chore: '整理',
+}
+
+function workTitle(commit: DayFactsLite['git']['repos'][number]['commits'][number]): string {
+  const subject = commit.subject.replace(/^[A-Za-z]+(\([^)]*\))?!?:\s*/, '')
+  return `${commit.type && actionLabel[commit.type] ? `${actionLabel[commit.type]}：` : ''}${subject}`
+}
+
 function drawSectionTitle(doc: PDFKit.PDFDocument, title: string, y: number): number {
   doc.fillColor('#172033').fontSize(15).text(title, 42, y)
   return y + 25
@@ -53,7 +68,7 @@ export async function renderPdfReport(facts: DayFactsLite): Promise<Uint8Array> 
   doc.roundedRect(42, 42, 511, 118, 18).fill('#263a8e')
   doc.fillColor('#dce3ff').fontSize(8).text('GOULE · ENOUGH, CLOCK OUT', 62, 64)
   doc.fillColor('#ffffff').fontSize(25).text(`${facts.dayId} 工作日报`, 62, 82)
-  doc.fillColor('#dce3ff').fontSize(10).text('事实层证据 · 本地生成 · 不含对话正文', 62, 119)
+  doc.fillColor('#dce3ff').fontSize(10).text(`今天完成 ${facts.git.totals.commits} 项变更`, 62, 119)
   doc.fillColor('#c4ceff').fontSize(8).text(`${facts.boundary.tz}  ·  逻辑日 ${facts.boundary.cutoffHour}:00 起`, 62, 140)
 
   const mouse = dayFactsMouse(facts)
@@ -78,16 +93,16 @@ export async function renderPdfReport(facts: DayFactsLite): Promise<Uint8Array> 
   })
   y = baseY + 28
 
-  y = drawSectionTitle(doc, 'Git 总结', y)
+  y = drawSectionTitle(doc, '今天做了什么', y)
   const commits = topCommits(facts, 8)
   if (commits.length === 0) {
     doc.fillColor('#667085').fontSize(9).text('今天没有发现已配置仓库的 commit。', 48, y)
     y += 20
   } else {
     for (const commit of commits) {
-      if (y > 735) { doc.addPage(); y = 48; y = drawSectionTitle(doc, 'Git 总结（续）', y) }
+      if (y > 735) { doc.addPage(); y = 48; y = drawSectionTitle(doc, '今天做了什么（续）', y) }
       doc.fillColor('#4169e1').fontSize(8).text((commit.type ?? 'commit').toUpperCase(), 48, y, { width: 54 })
-      doc.fillColor('#172033').fontSize(9).text(shorten(commit.subject, 72), 108, y, { width: 330, height: 16, ellipsis: true })
+      doc.fillColor('#172033').fontSize(9).text(shorten(workTitle(commit), 72), 108, y, { width: 330, height: 16, ellipsis: true })
       doc.fillColor('#7b8496').fontSize(7).text(`${commit.files} 文件 · +${commit.insertions}/-${commit.deletions}`, 448, y, { width: 100, align: 'right' })
       y += 18
     }

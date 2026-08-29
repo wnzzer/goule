@@ -82,7 +82,7 @@ bun run typecheck     # bunx tsc --noEmit
 fixture 含真实 session 与 commit 标题，因此不入库，克隆后需自己生成一次：
 
 ```bash
-# ① 生成 fixture（不带日期就是今天）
+# ① 生成 fixture（不带日期就是今天，默认归档最近 7 个逻辑日）
 bun run scripts/make-prototype-fixture.ts 2026-08-28
 
 # ② 起静态服务
@@ -90,6 +90,9 @@ python3 -m http.server 8912 --directory prototypes/dusk-ledger
 
 # ③ 打开 http://localhost:8912/index.html
 ```
+
+原型页顶栏使用年月日日期框，可切换归档中的指定逻辑日；「日报」页先展示今天完成的事项，辅助核验信息收在侧栏，并提供复制 Markdown、导出 PDF、下载分享图。复制按钮或按 `C` 复制分享版日报，`Ctrl/Cmd+C` 保留浏览器默认的选区复制行为。
+归档天数可作为第三个参数调整，例如 `... 2026-08-28 prototypes/dusk-ledger/fixture.js 14`。
 
 改了 `.jsx` 需要重新打包（`.css` 直接刷新即可）：
 

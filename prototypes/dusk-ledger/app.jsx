@@ -3,7 +3,11 @@ const { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakColor } = window;
 
 // fixture.js 由 scripts/make-prototype-fixture.ts 从真实 scanDay 输出生成。
 // 它含真实 session / commit 标题，因此不入库——克隆下来先自己跑一次生成。
-const D = window.GOULE_DATA;
+// 归档按日期存放在 GOULE_ARCHIVE；通过 URL 的 date 参数切换当前日。
+const ARCHIVE = window.GOULE_ARCHIVE || {};
+const ARCHIVE_DAYS = Object.keys(ARCHIVE).sort();
+const requestedDay = new URLSearchParams(window.location.search).get("date");
+const D = (requestedDay && ARCHIVE[requestedDay]) || window.GOULE_DATA || ARCHIVE[ARCHIVE_DAYS[ARCHIVE_DAYS.length - 1]];
 if (!D) {
   document.getElementById("root").innerHTML =
     '<div class="boot-hint"><h1>缺少 fixture.js</h1>'
@@ -65,13 +69,14 @@ const COMMITS = D.git.commits;
 // 轴裁到真正有活动的区间，避免整条时间轴三分之二是空的
 const AXIS = (() => {
   const marks = [...HAND, ...AGENT_ALL, ...COMMITS.map(c => [c.at, c.at])];
+  if (!marks.length) return { start: D.boundary.start, end: D.boundary.start + HOUR };
   const lo = Math.min(...marks.map(x => x[0]));
   const hi = Math.max(...marks.map(x => x[1]));
   return { start: Math.floor(lo / HOUR) * HOUR, end: Math.ceil(hi / HOUR) * HOUR };
 })();
 
-const HAND_FIRST = Math.min(...HAND.map(x => x[0]));
-const HAND_LAST = Math.max(...HAND.map(x => x[1]));
+const HAND_FIRST = HAND.length ? Math.min(...HAND.map(x => x[0])) : D.boundary.start;
+const HAND_LAST = HAND.length ? Math.max(...HAND.map(x => x[1])) : D.boundary.start;
 
 function fmtDur(ms) {
   const m = Math.round(ms / MIN);
@@ -238,7 +243,7 @@ function Timeline({ emphasis }) {
   </section>;
 }
 
-// ── 证据簿：按仓库把 session 与 commit 并到一起 ──────────────────────
+// ── 工作记录：按仓库把 session 与 commit 并到一起 ─────────────────────
 function buildGroups() {
   const repos = D.git.repos;
   const repoOf = cwd => {
@@ -297,7 +302,7 @@ function SessionRow({ s, maxMin, maxOut }) {
   return <div className="session-row">
     <span className="session-tool">{s.tool === "claude-code" ? "CC" : "CX"}</span>
     <span className="session-title">
-      {s.title || <em className="empty-note">这段没留下标题（Codex 不给，我也不替它编）</em>}
+      {s.title || <em className="empty-note">这段没有标题（原始记录没有提供）</em>}
       {s.isSidechain && <span className="session-tag">subagent</span>}
     </span>
     <MiniBar value={s.minutes} max={maxMin} tone="a"/>
@@ -313,8 +318,8 @@ function Ledger() {
   return <section className="section" id="evidence">
     <div className="section-head">
       <div>
-        <h2>证据簿</h2>
-        <p className="section-note">今天的活儿都落在这儿。几个会话可能同时开着，所以时长合计只是上界，别当工时</p>
+        <h2>工作记录</h2>
+        <p className="section-note">今天的会话和提交都在这里。会话可能同时运行，所以合计时长只是参考，不等于工时</p>
       </div>
       <div className="legend legend-static">
         {D.git.repos.length} 个仓库 · {COMMITS.length} 次提交 · {D.git.insertions + D.git.deletions} 行改动
@@ -360,7 +365,7 @@ function Ledger() {
                     <CommitRow key={c.hash} c={c}
                       scale={Math.max(...g.commits.map(x => Math.max(x.insertions, x.deletions)), 1)}/>)}</div>
                 : <span className="empty-note">
-                    {g.repo ? "这个仓库今天没有我的提交——活儿还在手上。" : "这儿不是 git 仓库，没有提交可对。"}
+                    {g.repo ? "这个仓库今天没有提交记录，工作可能还在进行中。" : "这个目录不是 Git 仓库，没有可关联的提交。"}
                   </span>}
             </div>
           </div>}
@@ -389,7 +394,7 @@ function Tokens() {
   const hit = t.cacheRead / (uncached + t.cacheRead);
   const maxOut = Math.max(1, ...BY_TOOL.map(x => x.output));
   return <section className="panel" id="tokens">
-    <h3>机器替我写了多少</h3>
+    <h3>Agent 帮我写了多少</h3>
 
     <div className="stat-lead">
       <span className="stat-value">{fmtInt(t.output)}</span>
@@ -452,14 +457,14 @@ function Hourly() {
             </p>
           </>
         : <div className="chart-empty">
-            <span>这个我还没开。没有数据就空着，不画条假曲线糊弄自己。</span>
+            <span>鼠标统计还没开启。没有数据就留空，不把空白当成 0。</span>
             <code className="cmd">goule activity start</code>
           </div>}
     </div>
 
     <p className="panel-caveat">
       两张图共用一根 24 小时的轴，但<strong>各算各的</strong>：分钟和次数不是一个量纲，不叠一起。
-      点击只是另一种「我在场」的证据，<strong>不算进工时</strong>，也不参与恢复信号。
+      点击只是另一种「我在场」的参考，<strong>不算进工时</strong>，也不参与恢复判断。
     </p>
   </section>;
 }
@@ -483,14 +488,14 @@ const fmtSignal = (v, unit) => {
 
 function Recovery() {
   const fired = D.signals.filter(s => s.fired);
-  return <section className="section" id="recovery">
+  return <section className="section" id="recovery" tabIndex="-1">
     <div className="section-head">
       <div>
-        <h2>我今天透支了吗</h2>
+        <h2>压力分析</h2>
         <p className="section-note">
           {fired.length === 0
-            ? `${D.signals.length} 项都没响。每项按自己的量纲比自己的线，不合成一个分数——那种数字只会变成新的鞭子。`
-            : `${fired.length} 项响了。它们不是罪状，是今天可以少做一点的理由。`}
+            ? `今天没有明显的透支提醒。${D.signals.length} 项观察都只和自己的基线比较，不合成一个分数。`
+            : `今天发现 ${fired.length} 项压力提醒。它们不是责备，而是在告诉你：可以少做一点，收尾后留时间休息。`}
         </p>
       </div>
       <div className="legend legend-static">
@@ -521,65 +526,105 @@ function Recovery() {
 }
 
 // ── 日报 ────────────────────────────────────────────────────────────
+// 日报先回答“今天做了什么”，工时、token 和压力信号放到辅助信息，
+// 这样复制或分享时，读者先看到交付结果，而不是一串自我核对的数字。
+const COMMIT_ACTION_LABEL = { feat: "新增", fix: "修复", refactor: "重构", perf: "优化", docs: "补充文档", test: "补充测试", chore: "整理" };
+function commitWorkTitle(c) {
+  const raw = (c.description || c.subject || "未命名变更").replace(/^[A-Za-z]+(\([^)]*\))?!?:\s*/, "");
+  return `${COMMIT_ACTION_LABEL[c.type] ? `${COMMIT_ACTION_LABEL[c.type]}：` : ""}${raw}`;
+}
+function commitWorkMeta(c) {
+  return `${c.repoName || "未识别仓库"} · ${c.files} 个文件 · +${c.insertions}/−${c.deletions}`;
+}
+const TITLED_SESSIONS = D.sessions.filter(s => s.title && s.title.trim()).slice(0, 8);
+const REPORT_WORK_ITEMS = COMMITS.map(c => ({ kind: "commit", key: c.hash, title: commitWorkTitle(c), meta: commitWorkMeta(c), commit: c }));
+const REPORT_IN_PROGRESS = TITLED_SESSIONS
+  .filter(s => !REPORT_WORK_ITEMS.some(item => item.title.toLowerCase() === s.title.trim().toLowerCase()))
+  .map(s => ({ key: s.id, title: s.title.trim(), meta: `${s.branch || "未识别分支"} · ${s.minutes >= 1 ? fmtDur(s.minutes * MIN) : "刚开始"}` }));
+
 const reportText = [
   `# ${D.dayId} · 开发活动日报`,
-  ``,
-  `## 今日事实`,
-  `- 动手活动：${fmtDur(HAND_MS)}`,
-  `- Agent 独占运行：${fmtDur(AGENT_ONLY_MS)}（另有 ${fmtDur(OVERLAP_MS)} 与动手重叠，不计入）`,
-  `- 有效会话：${D.sessions.length}`,
-  `- 输出 tokens：${fmtInt(D.tokens.output)}`,
-  `- 30 天动手 P90：${fmtDur(P90_MS)}`,
-  ``,
-  `## 提交`,
-  ...(COMMITS.length
-    ? COMMITS.map(c => `- \`${c.hash}\` ${c.subject} (+${c.insertions}/−${c.deletions})`)
-    : [`- 当日无提交`]),
-  ``,
-  `## 主要证据`,
-  ...GROUPS.map(g => `- ${g.name} · ${[...g.branches].join(" / ") || "未识别分支"} · ${g.sessions.length} sessions · ${g.commits.length} commits`),
-  ``,
-  `> 事实层 · 未启用规则判断`,
+  "",
+  "## 今天做了什么",
+  ...(REPORT_WORK_ITEMS.length
+    ? REPORT_WORK_ITEMS.map(item => `- ${item.title}（${item.meta}）`)
+    : REPORT_IN_PROGRESS.length
+      ? REPORT_IN_PROGRESS.map(item => `- 进行中：${item.title}（${item.meta}）`)
+      : [`- 今天没有可识别的交付项；${D.sessions.length} 个 session 已保留在辅助信息中。`]),
+  "",
+  ...(REPORT_IN_PROGRESS.length ? ["## 进行中的工作", ...REPORT_IN_PROGRESS.map(item => `- ${item.title}（${item.meta}）`), ""] : []),
+  "## 交付概览",
+  `- Git commit：${COMMITS.length} 个，${D.git.insertions + D.git.deletions} 行改动`,
+  `- 涉及仓库：${D.git.repos.length} 个`,
+  "",
+  "> Goule · 今日完成项汇总",
 ].join("\n");
 
 function Report({ onCopy, copied }) {
   const allQuiet = D.signals.every(s => !s.fired);
   return <div className="report-wrap">
     <div className="report-tools">
-      <span>和上一页同一份数据，只是换了个排版</span>
-      <button className="copy-btn" onClick={onCopy}>{copied ? "已复制" : "复制 Markdown"}</button>
+      <span>先看今天做成了什么，旁边信息用于核对</span>
+      <div className="report-actions">
+        <button className="copy-btn" onClick={onCopy}>{copied ? "已复制" : "复制 Markdown"}</button>
+        {D.exports?.pdf && <a className="copy-btn export-link" href={D.exports.pdf} download>导出 PDF</a>}
+        {D.exports?.sharePng && <a className="copy-btn export-link" href={D.exports.sharePng} download>下载分享图</a>}
+      </div>
     </div>
     <article className="report-paper">
       <div className="report-meta">GOULE DAILY · {D.dayId}</div>
-      <h2>开发活动日报</h2>
-      <p>今天动手 {fmtDur(HAND_MS)}，分布在 {fmtTime(HAND_FIRST)} 到 {fmtTime(HAND_LAST)} 之间。</p>
+      <h2>今天做了什么</h2>
+      <p>今天完成 {COMMITS.length} 项代码变更，涉及 {D.git.repos.length} 个仓库。</p>
       <hr className="report-rule"/>
-      <h3>今日事实</h3>
-      <ul>
-        <li>动手活动：<code>{fmtDur(HAND_MS)}</code></li>
-        <li>Agent 独占运行：<code>{fmtDur(AGENT_ONLY_MS)}</code>（另有 <code>{fmtDur(OVERLAP_MS)}</code> 与动手重叠，不计入）</li>
-        <li>有效会话：<code>{D.sessions.length}</code></li>
-        <li>输出 tokens：<code>{fmtInt(D.tokens.output)}</code></li>
-        <li>30 天动手 P90：<code>{fmtDur(P90_MS)}</code></li>
-      </ul>
-      <h3>提交</h3>
-      {COMMITS.length
-        ? <ul>{COMMITS.map(c =>
-            <li key={c.hash}><code>{c.hash}</code> {c.subject} <span className="report-dim">(+{c.insertions}/−{c.deletions})</span></li>)}
-          </ul>
-        : <p>当日无提交。</p>}
-      <h3>主要证据</h3>
-      <ul>{GROUPS.map(g =>
-        <li key={g.key}><code>{g.name}</code> · {[...g.branches].join(" / ") || "未识别分支"} · {g.sessions.length} sessions · {g.commits.length} commits</li>)}
-      </ul>
-      <div className="report-callout">
-        <strong>{allQuiet ? "今天没有触发恢复信号。" : "今天有恢复信号触发。"}</strong>
-        <p>{allQuiet
-          ? `${D.signals.length} 项信号全部在阈值内。`
-          : D.signals.filter(s => s.fired).map(s => (SIGNAL_META[s.id] || {}).label || s.id).join("、")}</p>
+      <div className="report-grid">
+        <div className="report-primary">
+          <section className="report-section">
+            <h3>完成项</h3>
+            {REPORT_WORK_ITEMS.length
+              ? <ol className="report-work-list">{REPORT_WORK_ITEMS.map((item, index) =>
+                  <li className="report-work-item" key={item.key}>
+                    <span className="report-work-index">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="report-work-copy"><strong>{item.title}</strong><small>{item.meta}</small></span>
+                  </li>)}
+                </ol>
+              : <p className="report-empty">今天没有 Git 提交落地。</p>}
+          </section>
+
+          {REPORT_IN_PROGRESS.length > 0 && <section className="report-section">
+            <h3>进行中的工作</h3>
+            <ul className="report-progress-list">{REPORT_IN_PROGRESS.map(item =>
+              <li key={item.key}><strong>{item.title}</strong><small>{item.meta}</small></li>)}
+            </ul>
+          </section>}
+
+          <section className="report-section report-delivery">
+            <h3>交付概览</h3>
+            <div className="report-delivery-grid">
+              <span><strong>{COMMITS.length}</strong><small>个提交</small></span>
+              <span><strong>{D.git.insertions + D.git.deletions}</strong><small>行改动</small></span>
+              <span><strong>{D.git.repos.length}</strong><small>个仓库</small></span>
+              <span><strong>{D.sessions.length}</strong><small>个会话</small></span>
+            </div>
+          </section>
+        </div>
+
+        <aside className="report-aside">
+          <h3>辅助信息</h3>
+          <p className="report-aside-note">这些内容帮助自己核对工作节奏，不抢交付结果的注意力。</p>
+          <div className="report-aside-stats">
+            <div><span>真人投入</span><strong>{fmtDur(HAND_MS)}</strong></div>
+            <div><span>Agent 独占运行</span><strong>{fmtDur(AGENT_ONLY_MS)}</strong></div>
+            <div><span>输出 tokens</span><strong>{fmtCompact(D.tokens.output)}</strong></div>
+            <div><span>活动时段</span><strong>{fmtTime(HAND_FIRST)}–{fmtTime(HAND_LAST)}</strong></div>
+          </div>
+          <div className="report-callout">
+            <strong>{allQuiet ? "今天没有明显的透支提醒。" : "今天有透支提醒。"}</strong>
+            <p>{allQuiet
+              ? `${D.signals.length} 项观察都在自己的范围内。`
+              : `发现：${D.signals.filter(s => s.fired).map(s => (SIGNAL_META[s.id] || {}).label || s.id).join("、")}。收尾后可以休息，不必再给自己加任务。`}</p>
+          </div>
+        </aside>
       </div>
-      <hr className="report-rule"/>
-      <div className="report-meta">事实层 · 未启用规则判断</div>
     </article>
   </div>;
 }
@@ -600,8 +645,8 @@ function summarize() {
     return {
       tone: "overdrawn",
       headline: "今天先停在这儿吧。",
-      body: `${names}已经亮了。我不给今天打分，但这几项摆在这儿——今天「够了」的门槛该往下调一点。`,
-      advice: "把手上这块收尾就关机，别再起新分支。",
+      body: `${names}出现了。它们不是责备，是提醒：今天可以把手头这块收尾，然后留时间休息。`,
+      advice: "收好手头这块就停，不再开启新的任务。",
     };
   }
   if (ratio >= 1) {
@@ -610,8 +655,8 @@ function summarize() {
       headline: "够了，早点下班。",
       body: `我今天动手 ${hh}，已经越过自己平常的 ${p90}。`
         + (commits ? `${commits} 个提交都落了地。` : "")
-        + "再往下做，边际是负的。",
-      advice: "现在就收，剩下的明天再说。",
+        + "再继续做，新增收益可能很小。",
+      advice: "现在就收，剩下的明天再接着做。",
     };
   }
   if (commits > 0 || D.tokens.output >= 100000) {
@@ -620,24 +665,32 @@ function summarize() {
       headline: "够了，今天可以收工。",
       body: `动手 ${hh}，比我平常的 ${p90} 少——但 `
         + (commits ? `${commits} 个提交都推上去了，改了 ${lines} 行；` : "")
-        + `机器还替我多跑了 ${fmtDur(AGENT_ONLY_MS)}。手没停多久，事情是办完了的。`,
-      advice: "证据够了，别用「才干了两个多小时」为难自己。",
+        + `Agent 还替我跑了 ${fmtDur(AGENT_ONLY_MS)}。人没有一直盯着屏幕，但事情已经往前走了。`,
+      advice: "记录已经说明今天做了什么，不用再用时长为难自己。",
     };
   }
   return {
-    tone: "light",
-    headline: "今天手头很轻。",
-    body: `动手 ${hh}，没有提交落地。也可能今天的活儿本来就不在编辑器里——这里只记看得见的那部分。`,
-    advice: "不下结论。想接着做就做，想收也随时可以。",
+      tone: "light",
+      headline: "今天手头很轻。",
+      body: `今天动手 ${hh}，暂时没有提交落地。也许今天的工作不在编辑器里，这里只记录能被看见的部分。`,
+      advice: "今天轻一点也没关系，想停就停，想继续再安排。",
   };
 }
 const SUMMARY = summarize();
+
+function navigateToDay(day) {
+  if (!day || day === D.dayId || !ARCHIVE[day]) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("date", day);
+  window.location.assign(url.toString());
+}
 
 // ── 首屏 ────────────────────────────────────────────────────────────
 function Hero() {
   const top = GROUPS[0];
   const ratio = Math.min(1, HAND_MS / P90_MS) * 100;
   const streak = D.signals.find(x => x.id === "consecutive_days");
+  const firedSignals = D.signals.filter(x => x.fired);
   const chips = [
     COMMITS.length ? `${COMMITS.length} 个提交落地` : "没有提交落地",
     `改了 ${D.git.insertions + D.git.deletions} 行`,
@@ -662,6 +715,15 @@ function Hero() {
 
       <ul className="hero-chips">
         {chips.map(c => <li key={c}>{c}</li>)}
+        <li className="hero-chip-action">
+          <button onClick={() => {
+            const recovery = document.getElementById("recovery");
+            recovery?.scrollIntoView({ behavior: "smooth", block: "start" });
+            recovery?.focus({ preventScroll: true });
+          }}>
+            压力分析 · {firedSignals.length ? `${firedSignals.length} 项提醒` : "暂无提醒"}
+          </button>
+        </li>
       </ul>
     </div>
 
@@ -683,7 +745,6 @@ function Hero() {
 function App() {
   const [view, setView] = useState("verify");
   const [copied, setCopied] = useState(false);
-  const [toast, setToast] = useState("");
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const palette = PALETTES[t.palette[0]] || PALETTES["#62D6A7"];
   const theme = THEMES[t.theme] || THEMES.night;
@@ -693,39 +754,57 @@ function App() {
     ...(t.theme === "night" ? { "--night": palette.night } : {}),
     ...Object.fromEntries(Object.entries(theme).map(([key, value]) => [`--${key.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}`, value]))
   };
-  const flash = msg => { setToast(msg); window.clearTimeout(window.__gouleToast); window.__gouleToast = window.setTimeout(() => setToast(""), 1800); };
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(reportText); setCopied(true); flash("日报 Markdown 已复制"); window.setTimeout(() => setCopied(false), 1800); }
-    catch { flash("浏览器未开放剪贴板权限"); }
+  const copyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(reportText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch { /* 剪贴板不可用时保持静默，不打断当前页面 */ }
   };
   const activateStyle = () => window.postMessage({ type: "miaoda:tweaks:activate" }, "*");
   useEffect(() => {
     const key = e => {
       if (/input|textarea/i.test(e.target.tagName)) return;
       if (e.key.toLowerCase() === "r") setView(v => v === "verify" ? "report" : "verify");
-      if (e.key.toLowerCase() === "c") copy();
+      // 只有单独按 C 才是日报快捷键；Ctrl/Cmd+C 必须交给浏览器复制当前选区。
+      if (e.key.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) copyReport();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, []);
 
-  const dateLabel = D.dayId.replace(/-/g, ".");
-  const weekday = new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date(D.boundary.start));
+  const archiveDays = ARCHIVE_DAYS.length ? ARCHIVE_DAYS : [D.dayId];
+  const currentDayIndex = Math.max(0, archiveDays.indexOf(D.dayId));
+  const previousDay = archiveDays[currentDayIndex - 1];
+  const nextDay = archiveDays[currentDayIndex + 1];
+  const changeDay = day => navigateToDay(day);
 
   return <div className={`app density-${t.density} theme-${t.theme}`} style={cssVars}>
     <header className="topbar">
       <div className="brand">
-        <svg className="brand-mark" viewBox="0 0 32 32" fill="none"><path d="M7 5h18v18l-5 5H7V5Z" stroke="currentColor" strokeWidth="1.5"/><path d="M12 11h8M12 16h5M20 23v5" stroke="currentColor" strokeWidth="1.5"/></svg>
+        <button className="brand-home" onClick={() => setView("verify")} aria-label="返回足迹首页">
+          <svg className="brand-mark" viewBox="0 0 32 32" fill="none"><path d="M7 5h18v18l-5 5H7V5Z" stroke="currentColor" strokeWidth="1.5"/><path d="M12 11h8M12 16h5M20 23v5" stroke="currentColor" strokeWidth="1.5"/></svg>
+        </button>
         <strong>Goule</strong>
       </div>
       <div className="date-nav">
-        <button className="icon-btn" onClick={() => flash(`原型只装载 ${D.dayId} 的数据`)} aria-label="前一天"><Icon name="left"/></button>
-        <span className="date-label"><strong>{dateLabel}</strong><span>{weekday}</span></span>
-        <button className="icon-btn" disabled aria-label="后一天"><Icon name="right"/></button>
+        <button className="icon-btn" disabled={!previousDay} onClick={() => changeDay(previousDay)} aria-label="前一天"><Icon name="left"/></button>
+        <label className="date-picker-wrap">
+          <input
+            className="date-picker"
+            type="date"
+            aria-label="选择归档日期"
+            value={D.dayId}
+            min={archiveDays[0]}
+            max={archiveDays[archiveDays.length - 1]}
+            onChange={e => changeDay(e.target.value)}
+          />
+        </label>
+        <button className="icon-btn" disabled={!nextDay} onClick={() => changeDay(nextDay)} aria-label="后一天"><Icon name="right"/></button>
       </div>
       <div className="topbar-right">
         <div className="mode-switch" role="tablist">
-          <button className={`mode-tab ${view === "verify" ? "active" : ""}`} onClick={() => setView("verify")}>核验</button>
+          <button className={`mode-tab ${view === "verify" ? "active" : ""}`} onClick={() => setView("verify")}>足迹</button>
           <button className={`mode-tab ${view === "report" ? "active" : ""}`} onClick={() => setView("report")}>日报</button>
         </div>
         <button className="icon-btn ghost" onClick={activateStyle} aria-label="调整风格"><Icon name="tune"/></button>
@@ -741,13 +820,11 @@ function App() {
             <div className="panel-row"><Tokens/><Hourly/></div>
             <Recovery/>
           </>
-        : <Report onCopy={copy} copied={copied}/>}
+        : <Report onCopy={copyReport} copied={copied} />}
     </div></main>
 
     <footer className="page-foot"><div className="main-inner">
-      <span><i className="state-dot"/>全都在你自己机器上，没往外传一个字节</span>
-      <span>这页只摆事实：不打分、不评效率、不替你编没发生过的提交</span>
-      <code>{D.dayId} · scanDay</code>
+      <span><i className="state-dot"/>今天已经留下记录，剩下的明天再继续。</span>
     </div></footer>
 
     <TweaksPanel title="Dusk Ledger">
@@ -763,7 +840,6 @@ function App() {
       <TweakRadio label="视觉重心" value={t.timelineEmphasis} options={[{value:"hand",label:"动手"},{value:"balanced",label:"平衡"},{value:"agent",label:"Agent"}]} onChange={v => setTweak("timelineEmphasis", v)}/>
     </TweaksPanel>
 
-    {toast && <div className="toast" role="status">{toast}</div>}
   </div>;
 }
 

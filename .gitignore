@@ -10,3 +10,4 @@ dist/
 
 # 原型 fixture 含真实 session / commit 标题，本地生成、不入库
 prototypes/*/fixture.js
+prototypes/*/exports/
