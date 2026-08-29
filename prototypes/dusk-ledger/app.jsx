@@ -238,42 +238,23 @@ function Timeline({ emphasis }) {
   </section>;
 }
 
-// ── 证据簿：按仓库把 session 与 commit 并到一起 ──────────────────────
+// ── 证据簿：直接渲染事实层的 join 结果 ───────────────────────────
 function buildGroups() {
-  const repos = D.git.repos;
-  const repoOf = cwd => {
-    if (!cwd) return null;
-    let best = null;
-    for (const r of repos) {
-      if (cwd === r.path || cwd.startsWith(r.path + "/")) {
-        if (!best || r.path.length > best.path.length) best = r;
-      }
-    }
-    return best;
-  };
-
-  const map = new Map();
-  for (const s of D.sessions) {
-    const repo = repoOf(s.cwd);
-    const key = repo ? repo.path : `loose:${s.cwd ?? "unknown"}`;
-    let g = map.get(key);
-    if (!g) {
-      g = {
-        key, repo,
-        name: repo ? repo.name : (s.cwd ?? "未知目录"),
-        path: repo ? repo.path : s.cwd,
-        branches: new Set(),
-        sessions: [], minutes: 0, output: 0,
-        commits: repo ? COMMITS.filter(c => c.repoName === repo.name) : [],
-      };
-      map.set(key, g);
-    }
-    if (s.branch) g.branches.add(s.branch);
-    g.sessions.push(s);
-    g.minutes += s.minutes;
-    g.output += s.tokens.output;
-  }
-  return [...map.values()].sort((a, b) =>
+  const sessions = new Map(D.sessions.map(s => [s.id, s]));
+  const commits = new Map(COMMITS.map(c => [c.sha, c]));
+  return D.joined.map((row, index) => {
+    const joinedSessions = row.sessionIds.map(id => sessions.get(id)).filter(Boolean);
+    return {
+      key: `${row.repo}:${row.branch ?? "unknown"}:${row.confidence}:${index}`,
+      name: row.repo,
+      branch: row.branch,
+      confidence: row.confidence,
+      sessions: joinedSessions,
+      minutes: row.minutes,
+      output: joinedSessions.reduce((sum, s) => sum + s.tokens.output, 0),
+      commits: row.commitShas.map(sha => commits.get(sha)).filter(Boolean),
+    };
+  }).sort((a, b) =>
     b.commits.length - a.commits.length || b.minutes - a.minutes);
 }
 const GROUPS = buildGroups();
@@ -330,10 +311,10 @@ function Ledger() {
             <span className="project-main">
               <span className="project-name">
                 {g.name}
-                {!g.repo && <span className="session-tag">非 git 仓库</span>}
+                <span className="session-tag">{g.confidence === "exact" ? "精确关联" : "时间窗关联"}</span>
               </span>
               <span className="project-meta">
-                <span>{[...g.branches].join(" / ") || (g.repo && g.repo.branch) || "未识别分支"}</span>
+                <span>{g.branch || "未识别分支"}</span>
                 <span>{g.sessions.length} sessions</span>
                 {g.commits.length > 0 && <span>{g.commits.length} commits</span>}
                 <span>输出 {fmtCompact(g.output)} tokens</span>
@@ -360,13 +341,32 @@ function Ledger() {
                     <CommitRow key={c.hash} c={c}
                       scale={Math.max(...g.commits.map(x => Math.max(x.insertions, x.deletions)), 1)}/>)}</div>
                 : <span className="empty-note">
-                    {g.repo ? "这个仓库今天没有我的提交——活儿还在手上。" : "这儿不是 git 仓库，没有提交可对。"}
+                    这组会话还没有关联到提交——活儿可能还在手上。
                   </span>}
             </div>
           </div>}
         </div>;
       })}
     </div>
+
+    {(D.unattributed.sessions.length > 0 || D.unattributed.commits.length > 0) &&
+      <div className="ledger-loose">
+        <div className="loose-head">
+          <strong>未关联项</strong>
+          <span>{D.unattributed.sessions.length} sessions · {D.unattributed.commits.length} commits</span>
+        </div>
+        {D.unattributed.sessions.map(s => <div className="loose-row" key={`session:${s.id}`}>
+          <span className="project-name">{s.title || "未留下标题的会话"}</span>
+          <span className="project-time">{s.minutes > 0 ? fmtDur(s.minutes * MIN) : "—"}</span>
+          <span className="project-meta">{s.tool} · {s.cwd || "未知目录"} · {s.branch || "未识别分支"}</span>
+        </div>)}
+        {D.unattributed.commits.map(c => <div className="loose-row" key={`commit:${c.repo}:${c.sha}`}>
+          <span className="project-name">{c.subject}</span>
+          <span className="project-time">{fmtTime(c.at)}</span>
+          <span className="project-meta">{c.repo} · {c.hash}</span>
+        </div>)}
+        <p className="loose-note">这些记录没有足够证据归到某条 session → commit 链路，所以单独保留。</p>
+      </div>}
   </section>;
 }
 

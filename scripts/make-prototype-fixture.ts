@@ -25,7 +25,7 @@ const facts = await scanDay(dayId, DEFAULT_CONFIG)
 const sessions = facts.sessions
   .filter((s) => s.minutes > 0 || totalTokens(s.tokens) > 0)
   .map((s) => ({
-    id: s.id.slice(0, 8),
+    id: s.id,
     tool: s.tool,
     title: s.title,
     cwd: anonPath(s.cwd),
@@ -68,6 +68,7 @@ const data = {
       error: null,
     })),
     commits: facts.git.repos.flatMap((r) => r.commits.map((c) => ({
+      sha: c.sha,
       hash: c.sha.slice(0, 7),
       at: c.ts,
       repoName: r.name,
@@ -85,11 +86,20 @@ const data = {
       refs: [],
     }))).sort((a, b) => a.at - b.at),
   },
-  // session↔commit 关联（main 的 join.ts 产出），原型暂未渲染
-  joined: facts.joined.length,
+  // session↔commit 关联（main 的 join.ts 产出）。内部关联键保留全长，避免截断后碰撞。
+  joined: facts.joined,
   unattributed: {
-    sessions: facts.unattributed.sessions.length,
-    commits: facts.unattributed.commits.length,
+    sessions: facts.unattributed.sessions.map((s) => ({
+      ...s,
+      cwd: anonPath(s.cwd),
+    })),
+    commits: facts.unattributed.commits.map((c) => ({
+      repo: c.repo,
+      sha: c.sha,
+      hash: c.sha.slice(0, 7),
+      at: c.ts,
+      subject: c.subject,
+    })),
   },
 }
 

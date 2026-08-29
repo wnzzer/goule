@@ -93,7 +93,7 @@ Goule 不是工时监控大盘，也不是另一个 productivity score。它的�
 │              │ goule / main                  │ 昨天恢复窗较短，   │
 │              │ 2 sessions → 3 commits        │ 今天的门槛已下调。 │
 │              │                               │ 查看依据           │
-│              │ as-goapi / feature/...        │                     │
+│              │ client-app / feature/...      │                     │
 │              │ 1 session → 2 commits         │                     │
 └──────────────┴───────────────────────────────┴─────────────────────┘
 ```
