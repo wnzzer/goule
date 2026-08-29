@@ -1,8 +1,8 @@
 # Goule 首期设计：AI Session 总结 + Git 总结
 
-> 文档版本：v1.0
-> 日期：2026-08-29
-> 阶段：Phase 1 设计（已评审冻结项见 §3）
+> 文档版本：v1.1
+> 日期：2026-08-29（Phase 2/3 路线图：2026-08-29 增补）
+> 阶段：Phase 1 设计（已评审冻结项见 §3）；Phase 2/3 为规划项，未冻结
 > 上游：`docs/PRD.md` v0.2
 
 ---
@@ -25,13 +25,15 @@ PRD v0.2 把 session 导入排在 v0.3、AI 总结排在 v0.2，而把规则引�
 
 PRD 的原则不变：Local-first、Evidence over vibe、No keylogger、不读源码送 LLM。本期新增一条落地规则见 §8。
 
-### 1.2 明确不做
+### 1.2 明确不做（Phase 1）
 
-- 规则引擎、verdict、产能分（Phase 2）
-- Web Dashboard、SQLite（Phase 2 及以后）
+- 行为反思、会话语义分析（Phase 2，见 §13）
+- 规则引擎、verdict、产能分（Phase 2，见 §13.4）
+- Web Dashboard、SQLite（Phase 2 及以后，按需引入）
+- 飞书接入与 IM 总结（Phase 3，见 §14）
 - Cursor（`state.vscdb` 为未公开 schema，随版本碎；成本高一档）
-- 飞书元数据、ActivityWatch（维持 PRD 排期）
-- 任何形式的云端、账号、遥测
+- ActivityWatch（维持 PRD 排期，Phase 2+ 可选）
+- 任何形式的云端账号、遥测、替用户自动发飞书
 
 ---
 
@@ -399,12 +401,278 @@ M4 即为首期的可用交付点；M5 为增强。
 
 ---
 
-## 12. 后续阶段的衔接
+## 12. 路线图总览
 
-Phase 2 引入规则引擎时，`DayFacts` 作为规则输入无需改动——这是把它定为核心契约的原因。届时同步引入：
+| 阶段 | 一句话 | 核心交付 | 依赖 |
+| --- | --- | --- | --- |
+| **Phase 1** | 事实采集与关联 | `DayFacts` + 事实层日报 | — |
+| **Phase 2** | 行为反思 + 产能判定 | `ReflectionReport` + `Verdict` + `goule check` | Phase 1 管道 + 可选本地 LLM |
+| **Phase 3** | 协作上下文补全 | 飞书聊天总结 + 三源 join 日报 | Phase 1 + 用户 OAuth |
+
+Phase 1 的 `DayFacts` 契约在各阶段**只增不改**——新阶段通过扩展字段或并列契约追加能力，不回写 Phase 1 语义。
+
+---
+
+## 13. Phase 2：行为反思层 + 规则引擎
+
+> 状态：规划项，未冻结。本节描述方向与边界，实施前需单独评审。
+
+### 13.1 目标
+
+在 Phase 1 的**硬事实**之上，增加一层**可解释的软洞察**：帮助用户看见工作模式（例如在同一问题上反复与 AI 拉锯），并给出可操作的改进提示。同时落地 PRD 中的规则引擎与 `goule check`。
+
+与 Phase 1 的分工：
+
+| 层 | 回答的问题 | 证据等级 | 是否触网 |
+| --- | --- | --- | --- |
+| Phase 1 事实层 | 今天发生了什么？ | 硬证据（元数据 + Git） | 默认否 |
+| Phase 2 反思层 | 模式是什么？可能原因？下次可试什么？ | 推断 + 标注置信度 | 可选（本地 Ollama 优先） |
+| Phase 2 规则层 | 今日产能是否达标？差什么？ | 确定性规则 | 否 |
+
+**原则不变**：反思层输出永远不能替代事实层；所有推断必须显式标注为「模型/启发式生成」，不得混入 `DayFacts`。
+
+### 13.2 行为反思：输入与信号
+
+反思层输入 = `DayFacts` + **受控会话投影**（`SessionDigest`），不是原始 jsonl 全文直送。
+
+#### 13.2.1 元数据信号（L7a，无 LLM）
+
+纯本地、确定性，从 Phase 1 已有字段推导：
+
+| 信号 ID | 检测逻辑 | 示例输出 |
+| --- | --- | --- |
+| `high_turn_ratio` | `user_turns / minutes` 超 P90 | 「session X：28 user turns / 45 min」 |
+| `long_session_low_output` | 时长 > P75 且 joined commits = 0 | 「164 min AI，0 commit 归属」 |
+| `branch_hopping` | 同日同 repo ≥ 3 个 branch 且有 session | 「acme-api 切换 4 次 branch」 |
+| `retry_cluster` | 同 repo+branch 上 ≥ 2 个 session 时间窗重叠 > 30 min | 「17:00–19:00 并行 3 窗口」 |
+| `title_gap` | `title IS NULL` 且 `user_turns >= 10` | 「2 个高轮次 session 无标题」 |
+
+这些信号写入 `ReflectionFacts.signals[]`，每条带 `severity: info | watch | notable` 与原始数值，供规则层引用，也供 LLM 作锚点（减少幻觉）。
+
+#### 13.2.2 会话 digest（L7b，本地抽取，可选触网）
+
+要回答「是否在**同一问题**上反复拷打」，仅靠 turns 不够，需要**受控地**读取用户消息（不含 assistant 长回复、不含 tool 输出、不含代码块）。
+
+抽取规则（本地完成，不触网）：
+
+1. 仅取 `kind === 'user'` 的行；剥除 fenced code block 与超过 200 字的粘贴。
+2. 每个 session 产出 `SessionDigest { id, user_prompts: string[] }`，上限 N 条（默认 20）/ session，单条截断 500 字。
+3. digest **默认不落盘**；仅 `--reflect` 或 `goule check --reflect` 时内存生成，进程结束即释放。
+4. 用户可在 config 中 `reflection.read_user_prompts: false` 完全关闭；关闭后 L7b 信号不可用，L7a 仍可用。
+
+#### 13.2.3 LLM 反思（L7c，可选）
+
+`ReflectionProvider` 接口，输入 `ReflectionInput`：
+
+```jsonc
+ReflectionInput {
+  day_id,
+  signals: Signal[],              // L7a 输出
+  digests: SessionDigest[],       // L7b 输出，可空
+  joined_summary: JoinedRow[],    // 来自 DayFacts.joined，脱敏同 PolishInput
+  redaction: "strict" | "standard"
+}
+```
+
+LLM 产出 `ReflectionReport`（**独立契约，不写入 DayFacts**）：
+
+```jsonc
+ReflectionReport {
+  schema_version: 1,
+  day_id,
+  generated_at,
+  provider: string,
+
+  patterns: [{
+    id: string,
+    label: string,                // 如「同一主题多轮拉锯」
+    confidence: "low" | "medium" | "high",
+    evidence: string[],           // 必须引用 signal id 或 digest 序号
+    session_ids: string[]
+  }],
+
+  hypotheses: [{                   // 「可能原因」，每条必须带 confidence
+    pattern_id: string,
+    text: string,
+    confidence: "low" | "medium" | "high"
+  }],
+
+  suggestions: [{                 // 「下次可试」，可操作、非评判
+    pattern_id: string,
+    text: string
+  }],
+
+  disclaimer: "本节为模型推断，非事实记录；标 * 的条目请结合 DayFacts 自行核验。"
+}
+```
+
+**强制规则**（继承 §8）：
+
+1. `--dry-run` 打印完整 `ReflectionInput`；首次开启 `standard` 须确认。
+2. Markdown 渲染时，`ReflectionReport` 整节折叠在「反思 · 模型生成」标题下，与事实层物理分隔。
+3. 不允许 LLM 修改 verdict 或伪造 commit/session 数量；数字一律引用 `DayFacts` 字段。
+
+默认 provider 顺序：**本地 Ollama** → OpenAI 兼容 endpoint；无配置时 `--reflect` 报错，不静默降级。
+
+### 13.3 CLI 扩展
+
+```bash
+goule report [--reflect] [--reflect-dry-run]   # 事实层 + 可选反思附录
+goule check [--reflect]                         # verdict + 可选反思（Phase 2 核心动作归位）
+goule reflect [--date today] [--dry-run]        # 仅输出 ReflectionReport JSON
+```
+
+`check` 无 `--reflect` 时行为与 PRD 一致：纯规则、零 LLM。
+
+### 13.4 规则引擎（与反思层并列）
+
+Phase 2 同步引入 PRD F2，输入仍为 `DayFacts`（+ 可选 `ReflectionFacts.signals` 作高级规则，默认规则包不依赖 LLM）：
 
 - `~/.goule/snapshots/YYYY-MM-DD.json` 冻结层（规则可变，结论不再可重建）
-- `goule check` 归位
-- 规则包 YAML 与首周校准向导
+- `goule check` → `Verdict { GO | CAUTION | NO_GO, score, reasons[], gap[] }`
+- 规则包 YAML（`balanced` / `relaxed` / `strict`）+ 首周校准向导
+- Phase 1 实测分布用于标定默认阈值
 
-Phase 1 实测采集到的真实分布（commit 数、活跃时长、session 数）将直接用于标定 `balanced` 规则包的默认阈值——这正是把数据管道排在规则引擎之前的收益。
+规则层与反思层**解耦**：verdict 不得调用 LLM；反思不得覆盖 verdict。
+
+### 13.5 模块与里程碑（Phase 2）
+
+```
+L7a reflect/signals/     → ReflectionFacts.signals[]    纯启发式
+L7b reflect/digest/      → SessionDigest[]              本地抽取
+L7c reflect/infer/       → ReflectionReport             可选 LLM
+L8  rules/               → Verdict                        确定性
+L9  render/              → Markdown（事实 + verdict + 反思分节）
+```
+
+| 里程碑 | 交付 |
+| --- | --- |
+| P2-M0 | `ReflectionFacts` / `ReflectionReport` 类型 + 信号单测 |
+| P2-M1 | L7a 信号 + L7b digest 抽取 + 隐私断言（禁发 assistant 正文） |
+| P2-M2 | L7c 反思 provider + `--dry-run` + Markdown 分节渲染 |
+| P2-M3 | L8 规则引擎 + snapshots + `goule check` |
+| P2-M4 | 首周校准向导 + `balanced` 规则包实测标定 |
+
+---
+
+## 14. Phase 3：飞书协作上下文
+
+> 状态：规划项，未冻结。相对 PRD v0.2「仅元数据」，本节**扩展为可读聊天摘要**；范围与隐私须单独评审。
+
+### 14.1 目标
+
+补齐「代码 + AI 之外，今天在协作里承诺/同步了什么」——从飞书群聊与单聊中抽取**当日事项更新**，与 `DayFacts` join，生成适合粘贴日报的三源视图。
+
+**不做**：替用户自动发送飞书消息（延续 PRD）；不做管理者监控；不做全量 IM 归档。
+
+### 14.2 数据源与授权
+
+| 项 | 决策 |
+| --- | --- |
+| 接入方式 | 飞书开放平台 OAuth（用户自配 app）；token 存 `~/.goule/feishu/token.json`，可 `goule feishu logout` 清除 |
+| 读取范围 | 用户显式选择的 chat 列表（`config.feishu.chats[]`）；默认空，须 opt-in |
+| 读取内容 | 逻辑日内消息：**文本 + 卡片标题 + thread 根消息**；不拉图片/文件/语音二进制 |
+| 元数据 | 同步保留 PRD 指标：消息数、@ 数、thread 回复率（Phase 3a，可先交付） |
+
+逻辑日边界与 Phase 1 一致（`day_cutoff_hour`），避免「飞书自然日」与「工作逻辑日」错位。
+
+### 14.3 `FeishuDayFacts` 契约
+
+并列于 `DayFacts`，扫描后 merge 为 `DayReport`：
+
+```jsonc
+FeishuDayFacts {
+  schema_version: 1,
+  day_id,
+  chats: [{
+    chat_id, name, type: "group" | "p2p",
+    stats: { messages, mentions_received, mentions_sent, threads_replied },
+    items: [{
+      id, ts, author_display,           // 不含 open_id 明文以外的 PII 扩展
+      kind: "status_update" | "todo_mention" | "blocker" | "decision" | "other",
+      summary: string,                  // 本地或 LLM 一句摘要
+      thread_id: string | null,
+      confidence: "heuristic" | "llm",
+      source_message_ids: string[]       // 可追溯，不写入日报正文
+    }]
+  }],
+  totals: { chats, messages, items }
+}
+```
+
+`kind` 分类：Phase 3a 用关键词 + @ 模式启发式；Phase 3b 可选 LLM 批量分类（同样 `--dry-run`）。
+
+### 14.4 三源 Join
+
+扩展 Phase 1 `joined` 为 `unified`：
+
+```jsonc
+unified: [{
+  repo: string | null,
+  branch: string | null,
+  feishu_chat: string | null,
+  ai_minutes: number,
+  commit_shas: string[],
+  feishu_item_ids: string[],
+  narrative: string | null            // Phase 3b LLM 可选：一句跨源叙述，标 *
+}]
+```
+
+Join 启发式（确定性优先）：
+
+1. **时间窗**：feishu item 前后 ±2h 内有同 repo 的 session 或 commit → 候选关联。
+2. **文本锚点**：item summary 含 repo 名 / branch 名 / commit subject 关键词 → 升置信度。
+3. **无法关联** → 落入 `unattributed.feishu_items[]`，与 Phase 1 孤儿桶同理。
+
+### 14.5 隐私与留存
+
+| 规则 | 说明 |
+| --- | --- |
+| 最小留存 | 默认**不持久化**消息正文；仅缓存当日 `FeishuDayFacts` 摘要于 `~/.goule/cache/feishu/YYYY-MM-DD.json`，可配置 TTL |
+| 脱敏 | 日报 export 默认隐去 chat 成员姓名，仅保留「项目群 A」别名；`standard` 模式可保留群名 |
+| 企业合规 | 文档与 CLI 首启须提示：IM 摘要可能含内部项目名，用户自行评估 `--dry-run` |
+| 撤销 | `goule feishu revoke` 删除 token + 全部 feishu cache |
+
+### 14.6 CLI 扩展
+
+```bash
+goule feishu auth                              # OAuth 授权
+goule feishu chats                             # 列出可选 chat，写入 config
+goule report [--feishu] [--format md|json]     # 三源日报
+goule scan --feishu                            # DayFacts + FeishuDayFacts JSON
+```
+
+### 14.7 里程碑（Phase 3）
+
+| 里程碑 | 交付 |
+| --- | --- |
+| P3-M0 | OAuth + chat 列表 + 元数据 stats（PRD v0.2 对齐） |
+| P3-M1 | 逻辑日消息拉取 + 启发式 item 抽取 + `FeishuDayFacts` |
+| P3-M2 | `unified` join + 事实层三源 Markdown 模板 |
+| P3-M3 | 可选 LLM 摘要/分类 + `--dry-run` |
+| P3-M4 | 与 Phase 2 反思层联动：「今日 blockers 在飞书与 notes 交叉验证」|
+
+---
+
+## 15. 阶段依赖关系
+
+```mermaid
+flowchart TB
+  P1[Phase 1<br/>DayFacts 事实管道]
+  P2a[Phase 2<br/>行为反思 ReflectionReport]
+  P2b[Phase 2<br/>规则引擎 Verdict]
+  P3[Phase 3<br/>飞书 FeishuDayFacts]
+
+  P1 --> P2a
+  P1 --> P2b
+  P1 --> P3
+  P2a -.-> P3
+  P2b -.-> P3
+
+  P1 --> R1[goule report / scan]
+  P2a --> R2[goule report --reflect]
+  P2b --> R3[goule check]
+  P3 --> R4[goule report --feishu 三源日报]
+```
+
+Phase 1 实测采集到的真实分布（commit 数、活跃时长、session 数、turns 分布）将直接用于标定 Phase 2 信号阈值与 `balanced` 规则包——这正是把数据管道排在反思/规则之前的收益。
