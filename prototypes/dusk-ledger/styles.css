@@ -7,8 +7,8 @@
   --muted: #93a0ad;
   --faint: #6f7c88;
   --line: rgba(243, 240, 232, .1);
-  --mint: #62d6a7;
-  --amber: #f4b65f;
+  --mint: #17a472;
+  --amber: #c0862b;
   --report-paper: #f3f0e8;
   --report-ink: #20262c;
   --report-rule: #d8d4cb;
@@ -391,4 +391,110 @@ h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: 0; }
 .boot-hint code {
   display: block; font: 12px "IBM Plex Mono"; background: #f5f6f4;
   border: 1px solid #e6e9e6; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px;
+}
+
+
+/* ── 图表基元 ─────────────────────────────────────────── */
+/* 配色经 dataviz 校验器验证（明度带 / 色度 / CVD / 对比度全通过）：
+   浅色 #008060 + #C47F12，深色 #17A472 + #C0862B。 */
+
+.tone-a i { background: var(--mint); }
+.tone-b i { background: var(--amber); }
+
+/* 子弹图：各行自有量纲，刻度不跨行共用 */
+.bullet {
+  position: relative; display: block; height: 6px; border-radius: 3px;
+  background: var(--wash-strong); overflow: visible;
+}
+.bullet-fill {
+  position: absolute; left: 0; top: 0; height: 100%;
+  border-radius: 3px; background: var(--mint);
+}
+.bullet.fired .bullet-fill { background: var(--amber); }
+.bullet-thresh {
+  position: absolute; top: -3px; width: 2px; height: 12px;
+  background: var(--paper); border-radius: 1px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.bullet-thresh.lower { background: var(--muted); }
+.key.bullet-key { background: var(--mint); }
+.key.thresh-key { width: 2px; height: 11px; border-radius: 1px; background: var(--paper); margin-right: 8px; }
+
+.bool-chip {
+  justify-self: start; font: 10.5px "IBM Plex Mono"; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 5px; padding: 2px 8px;
+}
+.bool-chip.on { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent); }
+.signal-flag {
+  margin-left: 8px; font: 9.5px "IBM Plex Mono"; color: var(--amber);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  border-radius: 4px; padding: 1px 5px;
+}
+
+/* 100% 构成条：段间 2px 底色缝 */
+.stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--wash-strong); }
+.stack-seg { display: block; height: 100%; }
+.stack-seg + .stack-seg { margin-left: 2px; }
+.seg-uncached { background: var(--mint); }
+.seg-cached { background: color-mix(in srgb, var(--amber) 55%, transparent); }
+.stack-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 9px; color: var(--muted); font-size: 10.5px; }
+.stack-legend .key { width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* 增删条：共用基线，组内共用刻度 */
+.diffbar { display: flex; align-items: center; gap: 2px; height: 6px; min-width: 54px; }
+.diffbar i { display: block; height: 100%; border-radius: 2px; min-width: 2px; }
+.diff-add { background: var(--mint); }
+.diff-del { background: color-mix(in srgb, var(--paper) 28%, transparent); }
+
+/* 小时柱：24 格同轴 */
+.hours { margin-top: 10px; }
+.hour-cols { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; align-items: end; height: 52px; }
+.hour-cols i { border-radius: 2px 2px 0 0; min-height: 0; }
+.hour-cols i.zero { height: 2px !important; background: var(--wash-strong) !important; border-radius: 1px; }
+
+/* 行内比例条 */
+.mini { display: block; height: 4px; border-radius: 2px; background: var(--wash-strong); overflow: hidden; }
+.mini i { display: block; height: 100%; border-radius: 2px; }
+
+.chart-block { margin-top: 20px; }
+.chart-title { color: var(--muted); font-size: 11px; margin-bottom: 10px; line-height: 1.5; }
+.chart-empty {
+  display: grid; gap: 10px; justify-items: start; padding: 14px 0 4px;
+  color: var(--faint); font-size: 11px;
+}
+.chart-empty .cmd { margin-top: 0; }
+
+.tool-row { display: grid; grid-template-columns: 88px minmax(0,1fr) 54px 62px; gap: 12px; align-items: center; padding: 5px 0; }
+.tool-name { color: var(--paper); font-size: 11.5px; }
+.tool-value { text-align: right; font: 500 11.5px "IBM Plex Mono"; }
+.tool-meta { text-align: right; color: var(--faint); font-size: 10px; }
+
+/* 恢复信号行：名称 | 子弹图 | 值 | 阈值 */
+.signal { grid-template-columns: 150px minmax(120px,260px) 76px 118px; align-items: center; justify-content: start; }
+.signal .bullet { max-width: 260px; }
+.signal-name { display: flex; align-items: center; }
+
+/* 会话行：工具 | 标题 | 分钟条+值 | 输出条+值 */
+.session-head {
+  display: grid; grid-template-columns: 26px minmax(0,1fr) 40px 54px 40px 46px;
+  gap: 10px; padding-bottom: 6px; color: var(--faint); font-size: 10px;
+}
+.session-head span:nth-child(3) { grid-column: 3 / 5; text-align: right; }
+.session-head span:nth-child(4) { grid-column: 5 / 7; text-align: right; }
+.session-row { grid-template-columns: 26px minmax(0,1fr) 40px 54px 40px 46px; align-items: center; }
+
+/* 提交行：hash | 类型 | 标题 | 增删条 | 增删值 | 时间 */
+.commit-row { grid-template-columns: 58px auto minmax(0,1fr) 54px auto auto; align-items: center; }
+
+@media (max-width: 900px) {
+  .signal { grid-template-columns: minmax(0,1fr) 70px; }
+  .signal .bullet, .signal .bool-chip { grid-column: 1 / -1; }
+  .signal-threshold { grid-column: 1 / -1; text-align: left; }
+  .session-head { display: none; }
+  .session-row { grid-template-columns: 24px minmax(0,1fr) 34px 46px; }
+  .session-row .mini:nth-of-type(2) { display: none; }
+  .commit-row { grid-template-columns: 54px minmax(0,1fr) auto; }
+  .diffbar { display: none; }
+  .tool-row { grid-template-columns: 74px minmax(0,1fr) 48px; }
+  .tool-meta { display: none; }
 }

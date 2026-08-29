@@ -87,6 +87,59 @@ function fmtCompact(n) {
   return `${(n / 1e6).toFixed(1)}M`;
 }
 
+// ── 图表基元 ────────────────────────────────────────────────────────
+// 配色经 dataviz 校验器验证：浅色 #008060/#C47F12、深色 #17A472/#C0862B
+// 均通过明度带、色度下限、CVD 分离度与 3:1 对比度五项检查。
+
+/** 子弹图：一行一个自有量纲的观测值 vs 它自己的阈值，不共用坐标轴 */
+function Bullet({ value, threshold, fired, lowerIsWorse, label }) {
+  const scale = Math.max(value, threshold) * 1.25 || 1;
+  const v = Math.min(100, (value / scale) * 100);
+  const t = Math.min(100, (threshold / scale) * 100);
+  return <span className={`bullet ${fired ? "fired" : ""}`} role="img" aria-label={label}>
+    <i className="bullet-fill" style={{ width: `${v}%` }}/>
+    <i className={`bullet-thresh ${lowerIsWorse ? "lower" : ""}`} style={{ left: `${t}%` }}/>
+  </span>;
+}
+
+/** 100% 构成条：只用于同一个量的内部拆分，段间留 2px 底色缝 */
+function StackBar({ parts }) {
+  const sum = parts.reduce((t, p) => t + p.value, 0) || 1;
+  return <div className="stack">
+    {parts.map(p => <i key={p.key} className={`stack-seg seg-${p.key}`}
+      style={{ width: `${(p.value / sum) * 100}%` }} title={`${p.label} ${fmtInt(p.value)}`}/>)}
+  </div>;
+}
+
+/** 增删条：两个方向共用一条基线，比例可跨提交比较 */
+function DiffBar({ insertions, deletions, scale }) {
+  const s = scale || 1;
+  return <span className="diffbar" title={`+${insertions} / −${deletions}`}>
+    <i className="diff-add" style={{ width: `${(insertions / s) * 100}%` }}/>
+    <i className="diff-del" style={{ width: `${(deletions / s) * 100}%` }}/>
+  </span>;
+}
+
+/** 小倍数柱：24 小时同一坐标轴，供动手与点击各画一张 */
+function HourBars({ values, unit, tone }) {
+  const max = Math.max(1, ...values);
+  return <div className={`hours tone-${tone}`}>
+    <div className="hour-cols" role="img" aria-label={`按小时分布，单位${unit}`}>
+      {values.map((v, h) => <i key={h} style={{ height: `${v > 0 ? Math.max(6, (v / max) * 100) : 0}%` }}
+        className={v > 0 ? "" : "zero"}
+        title={`${String(h).padStart(2, "0")}:00 · ${Math.round(v)} ${unit}`}/>)}
+    </div>
+    <div className="hour-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+  </div>;
+}
+
+/** 行内比例条，配合同行的数值使用（数值本身就是直接标注） */
+function MiniBar({ value, max, tone }) {
+  return <span className={`mini tone-${tone}`}>
+    <i style={{ width: `${max > 0 ? Math.max(2, (value / max) * 100) : 0}%` }}/>
+  </span>;
+}
+
 function Icon({ name }) {
   const paths = {
     tune: <><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></>,
@@ -220,11 +273,12 @@ function buildGroups() {
 }
 const GROUPS = buildGroups();
 
-function CommitRow({ c }) {
+function CommitRow({ c, scale }) {
   return <div className="commit-row">
     <code className="commit-hash">{c.hash}</code>
     {c.type && <span className="commit-type">{c.type}{c.scope ? `(${c.scope})` : ""}</span>}
     <span className="commit-subject">{c.description || c.subject}</span>
+    <DiffBar insertions={c.insertions} deletions={c.deletions} scale={scale}/>
     <span className="commit-stat">
       <span className="add">+{c.insertions}</span><span className="del">−{c.deletions}</span>
     </span>
@@ -233,7 +287,7 @@ function CommitRow({ c }) {
   </div>;
 }
 
-function SessionRow({ s }) {
+function SessionRow({ s, maxMin, maxOut }) {
   const t = s.tokens;
   return <div className="session-row">
     <span className="session-tool">{s.tool === "claude-code" ? "CC" : "CX"}</span>
@@ -241,7 +295,9 @@ function SessionRow({ s }) {
       {s.title || <em className="empty-note">无标题（Codex 不提供，留空不编造）</em>}
       {s.isSidechain && <span className="session-tag">subagent</span>}
     </span>
+    <MiniBar value={s.minutes} max={maxMin} tone="a"/>
     <span className="session-min">{s.minutes >= 1 ? fmtDur(s.minutes * MIN) : (s.minutes > 0 ? "<1m" : "—")}</span>
+    <MiniBar value={t.output} max={maxOut} tone="b"/>
     <span className="session-out" title={`输出 ${fmtInt(t.output)} tokens`}>{fmtCompact(t.output)}</span>
   </div>;
 }
@@ -286,12 +342,18 @@ function Ledger() {
           {isOpen && <div className="ledger-detail">
             <div className="detail-block">
               <div className="detail-label">会话 · 标题与输出 tokens</div>
-              <div className="session-list">{g.sessions.map(s => <SessionRow key={s.id} s={s}/>)}</div>
+              <div className="session-head"><span/><span>会话</span><span>动手</span><span>输出</span></div>
+              <div className="session-list">{g.sessions.map(s =>
+                <SessionRow key={s.id} s={s}
+                  maxMin={Math.max(...g.sessions.map(x => x.minutes), 1)}
+                  maxOut={Math.max(...g.sessions.map(x => x.tokens.output), 1)}/>)}</div>
             </div>
             <div className="detail-block">
               <div className="detail-label">提交</div>
               {g.commits.length
-                ? <div className="commit-list">{g.commits.map(c => <CommitRow key={c.hash} c={c}/>)}</div>
+                ? <div className="commit-list">{g.commits.map(c =>
+                    <CommitRow key={c.hash} c={c}
+                      scale={Math.max(...g.commits.map(x => Math.max(x.insertions, x.deletions)), 1)}/>)}</div>
                 : <span className="empty-note">
                     {g.repo ? "这个仓库当日没有你的提交。" : "不是 git 仓库，没有提交可关联。"}
                   </span>}
@@ -304,60 +366,96 @@ function Ledger() {
 }
 
 // ── Token 用量 ──────────────────────────────────────────────────────
+const TOOL_LABEL = { "claude-code": "Claude Code", codex: "Codex" };
+const BY_TOOL = (() => {
+  const m = new Map();
+  for (const s of D.sessions) {
+    const cur = m.get(s.tool) || { tool: s.tool, output: 0, sessions: 0 };
+    cur.output += s.tokens.output;
+    cur.sessions++;
+    m.set(s.tool, cur);
+  }
+  return [...m.values()].sort((a, b) => b.output - a.output);
+})();
+
 function Tokens() {
   const t = D.tokens;
   const uncached = D.tokenSummary.uncachedInput;
   const hit = t.cacheRead / (uncached + t.cacheRead);
+  const maxOut = Math.max(1, ...BY_TOOL.map(x => x.output));
   return <section className="panel" id="tokens">
     <h3>Token 用量</h3>
+
     <div className="stat-lead">
       <span className="stat-value">{fmtInt(t.output)}</span>
       <span className="stat-unit">输出 tokens</span>
     </div>
     <p className="panel-note">其中推理 {fmtCompact(t.reasoning)}。这是当天真正被生成出来的量。</p>
-    <div className="bar-row">
-      <div className="bar"><i style={{ width: `${hit * 100}%` }}/></div>
-      <span className="bar-label">缓存命中 {(hit * 100).toFixed(0)}%</span>
+
+    <div className="chart-block">
+      <div className="chart-title">按工具的输出量</div>
+      {BY_TOOL.map(x => <div className="tool-row" key={x.tool}>
+        <span className="tool-name">{TOOL_LABEL[x.tool] || x.tool}</span>
+        <MiniBar value={x.output} max={maxOut} tone="a"/>
+        <span className="tool-value">{fmtCompact(x.output)}</span>
+        <span className="tool-meta">{x.sessions} 个会话</span>
+      </div>)}
     </div>
-    <dl className="kv">
-      <div><dt>未命中缓存输入</dt><dd title={fmtInt(uncached)}>{fmtCompact(uncached)}</dd></div>
-      <div><dt>缓存读取</dt><dd title={fmtInt(t.cacheRead)}>{fmtCompact(t.cacheRead)}</dd></div>
-    </dl>
+
+    <div className="chart-block">
+      <div className="chart-title">输入构成 · 缓存命中 {(hit * 100).toFixed(0)}%</div>
+      <StackBar parts={[
+        { key: "uncached", value: uncached, label: "未命中缓存" },
+        { key: "cached", value: t.cacheRead, label: "缓存读取" },
+      ]}/>
+      <div className="stack-legend">
+        <span><i className="key seg-uncached"/>未命中缓存 {fmtCompact(uncached)}</span>
+        <span><i className="key seg-cached"/>缓存读取 {fmtCompact(t.cacheRead)}</span>
+      </div>
+    </div>
+
     <p className="panel-caveat">
-      输入量不代表「你写了多少」：每一轮都要重发上下文，没命中缓存的部分会反复计入。
-      口径按事件时间归属到当日，不是把整份 session 文件记到今天。
+      输入量与输出量是两个不同的度量，刻意分成两张图、不共用坐标轴。
+      输入量也不代表「你写了多少」：每一轮都要重发上下文，没命中缓存的部分会反复计入。
     </p>
   </section>;
 }
 
-// ── 鼠标点击 ────────────────────────────────────────────────────────
+// ── 按小时分布：动手与点击各一张小倍数，同一条 24 小时坐标轴 ────────
 const COVERAGE_LABEL = { complete: "完整", partial: "部分", unavailable: "不可用" };
 
-function Mouse() {
+function Hourly() {
   const m = D.mouse;
-  const max = Math.max(1, ...m.byHour);
-  return <section className="panel" id="mouse">
-    <h3>鼠标点击</h3>
-    {m.enabled ? <>
-      <div className="stat-lead">
-        <span className="stat-value">{fmtInt(m.clicks)}</span>
-        <span className="stat-unit">次点击</span>
-      </div>
-      <p className="panel-note">
-        采集 {fmtDur(m.observedMinutes * MIN)} · {m.provider} · 覆盖 {COVERAGE_LABEL[m.coverage]}
-      </p>
-      <div className="hour-bars" role="img" aria-label="按小时的点击分布">
-        {m.byHour.map((v, h) => <i key={h} style={{ height: `${Math.max(2, (v / max) * 100)}%` }}
-          title={`${String(h).padStart(2, "0")}:00 · ${v} 次`}/>)}
-      </div>
-      <div className="hour-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
-    </> : <>
-      <div className="stat-lead off"><span className="stat-value">未开启</span></div>
-      <p className="panel-note">默认关闭。开启后只保存按小时聚合的点击次数，不记录坐标、窗口名或应用名。</p>
-      <code className="cmd">goule activity start</code>
-    </>}
+  const handTotal = D.handsOnByHour.reduce((a, b) => a + b, 0);
+  const activeHours = D.handsOnByHour.filter(v => v > 0).length;
+  const peak = D.handsOnByHour.indexOf(Math.max(...D.handsOnByHour));
+  return <section className="panel" id="hourly">
+    <h3>按小时分布</h3>
+
+    <div className="chart-block">
+      <div className="chart-title">动手分钟数 · 覆盖 {activeHours} 个小时，峰值在 {String(peak).padStart(2, "0")}:00</div>
+      <HourBars values={D.handsOnByHour} unit="分钟" tone="a"/>
+    </div>
+
+    <div className="chart-block">
+      <div className="chart-title">鼠标点击次数</div>
+      {m.enabled
+        ? <>
+            <HourBars values={m.byHour} unit="次" tone="b"/>
+            <p className="panel-note">
+              共 {fmtInt(m.clicks)} 次 · 采集 {fmtDur(m.observedMinutes * MIN)} · {m.provider} · 覆盖 {COVERAGE_LABEL[m.coverage]}
+            </p>
+          </>
+        : <div className="chart-empty">
+            <span>采集未开启，这一格没有数据——不画占位曲线。</span>
+            <code className="cmd">goule activity start</code>
+          </div>}
+    </div>
+
     <p className="panel-caveat">
+      两张图共用 24 小时坐标轴但<strong>各自独立</strong>：分钟数与点击次数量纲不同，不叠在一张图上。
       点击数是独立活动证据，<strong>不计入动手时长</strong>，也不参与压力信号。
+      动手合计 {fmtDur(handTotal * MIN)}。
     </p>
   </section>;
 }
@@ -387,20 +485,31 @@ function Recovery() {
         <h2>今天的恢复信号</h2>
         <p className="section-note">
           {fired.length === 0
-            ? `${D.signals.length} 项信号全部未触发。只陈述观测事实，不打分。`
+            ? `${D.signals.length} 项信号全部未触发。每一项按自己的量纲和阈值单独衡量，不合成分数。`
             : `${D.signals.length} 项中触发了 ${fired.length} 项。压力债 ${D.debt.toFixed(2)}。`}
         </p>
+      </div>
+      <div className="legend legend-static">
+        <span><i className="key bullet-key"/>观测值</span>
+        <span><i className="key thresh-key"/>阈值</span>
       </div>
     </div>
     <div className="signals">
       {D.signals.map(s => {
         const meta = SIGNAL_META[s.id] || { label: s.id, unit: "m" };
+        const dir = meta.lowerIsWorse ? "低于" : "超过";
         return <div className={`signal ${s.fired ? "fired" : ""}`} key={s.id}>
-          <span className="signal-name">{meta.label}</span>
-          <span className="signal-value">{fmtSignal(s.value, meta.unit)}</span>
-          <span className="signal-threshold">
-            {meta.lowerIsWorse ? "低于" : "超过"} {fmtSignal(s.threshold, meta.unit)} 触发
+          <span className="signal-name">
+            {meta.label}
+            {s.fired && <span className="signal-flag">已触发</span>}
           </span>
+          {meta.unit === "bool"
+            ? <span className={`bool-chip ${s.value ? "on" : ""}`}>{s.value ? "是" : "否"}</span>
+            : <Bullet value={s.value} threshold={s.threshold} fired={s.fired}
+                lowerIsWorse={meta.lowerIsWorse}
+                label={`${meta.label} ${fmtSignal(s.value, meta.unit)}，${dir} ${fmtSignal(s.threshold, meta.unit)} 触发`}/>}
+          <span className="signal-value">{fmtSignal(s.value, meta.unit)}</span>
+          <span className="signal-threshold">{dir} {fmtSignal(s.threshold, meta.unit)}</span>
         </div>;
       })}
     </div>
@@ -564,7 +673,7 @@ function App() {
             <Hero/>
             <Timeline emphasis={t.timelineEmphasis}/>
             <Ledger/>
-            <div className="panel-row"><Tokens/><Mouse/></div>
+            <div className="panel-row"><Tokens/><Hourly/></div>
             <Recovery/>
           </>
         : <Report onCopy={copy} copied={copied}/>}
@@ -581,7 +690,7 @@ function App() {
       <TweakRadio label="底色" value={t.theme} options={[{value:"pure",label:"纯白"},{value:"cafe",label:"Vibe 灰"},{value:"warm",label:"暖纸"},{value:"night",label:"深夜"}]}
         onChange={v => setTweak(v === "cafe" ? { theme: v, palette: ["#F99C00","#00A873","#F3F4F6"] } : { theme: v })}/>
       <TweakColor label="强调色" value={t.palette}
-        options={[["#0A6B4E","#E08A1E","#FFFFFF"],["#F99C00","#00A873","#F3F4F6"],["#62D6A7","#F4B65F","#0D141C"],["#F0A96B","#E9CF82","#17120F"]]}
+        options={[["#0A6B4E","#C47F12","#FFFFFF"],["#F99C00","#00A873","#F3F4F6"],["#62D6A7","#C0862B","#0D141C"],["#F0A96B","#E9CF82","#17120F"]]}
         onChange={v => setTweak("palette", v)}/>
       <TweakSection label="Layout"/>
       <TweakRadio label="信息密度" value={t.density} options={[{value:"compact",label:"紧凑"},{value:"comfortable",label:"舒展"}]} onChange={v => setTweak("density", v)}/>
@@ -594,10 +703,10 @@ function App() {
 }
 
 const PALETTES = {
-  "#0A6B4E": { mint: "#0A6B4E", amber: "#E08A1E", night: "#FFFFFF" },
-  "#187A55": { mint: "#0A6B4E", amber: "#E08A1E", night: "#FFFFFF" },
+  "#0A6B4E": { mint: "#008060", amber: "#C47F12", night: "#FFFFFF" },
+  "#187A55": { mint: "#008060", amber: "#C47F12", night: "#FFFFFF" },
   "#F99C00": { mint: "#F99C00", amber: "#00A873", night: "#F3F4F6" },
-  "#62D6A7": { mint: "#62D6A7", amber: "#F4B65F", night: "#0D141C" },
+  "#62D6A7": { mint: "#17A472", amber: "#C0862B", night: "#0D141C" },
   "#7FB8FF": { mint: "#7FB8FF", amber: "#B7A2F6", night: "#0B1320" },
   "#F0A96B": { mint: "#B86F2F", amber: "#C6923F", night: "#17120F" }
 };

@@ -42,6 +42,7 @@ const data = {
   handBlocks: facts.activity.handsOn.blocks.map((b) => [b.start, b.end]),
   agentBlocks: facts.activity.agent.blocks.map((b) => [b.start, b.end]),
   handMinutes: facts.activity.handsOn.minutes,
+  handsOnByHour: facts.activity.handsOn.byHour,
   agentMinutes: facts.activity.agent.minutes,
   mouse: facts.activity.mouseClicks,
   baseline: facts.stress.baseline,
