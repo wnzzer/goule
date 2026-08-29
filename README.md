@@ -6,6 +6,16 @@
 
 > **Enough, clock out.**
 
+## 截图
+
+Goule 把「今天够不够下班」建立在可核验的工作证据上：
+
+![今日核验：够了，今天可以收工](docs/screenshots/overview.png)
+
+![证据面板：AI session、token 与压力信号](docs/screenshots/evidence.png)
+
+![日报：今天做了什么，以及为什么可以停](docs/screenshots/daily-report.png)
+
 本地优先的「今日工作核验 + 日报双模」工具：读取 Git 与 AI 编码 session，按你自己定义的规则告诉你**够了没有**，并生成可复制的证据页。
 
 ## 状态
@@ -89,13 +99,13 @@ fixture 含真实 session 与 commit 标题，因此不入库，克隆后需自�
 # ① 生成 fixture（不带日期就是今天，默认归档最近 7 个逻辑日）
 bun run scripts/make-prototype-fixture.ts 2026-08-28
 
-# ② 起静态服务
-python3 -m http.server 8912 --directory prototypes/dusk-ledger
+# ② 启动本地原型服务（鼠标点击数据通过本地事件流实时更新）
+bun run prototype:serve
 
 # ③ 打开 http://localhost:8912/index.html
 ```
 
-原型页顶栏使用年月日日期框，可切换归档中的指定逻辑日；「日报」页先展示今天完成的事项，辅助核验信息收在侧栏，并提供复制 Markdown、导出 PDF、下载分享图。复制按钮或按 `C` 复制分享版日报，`Ctrl/Cmd+C` 保留浏览器默认的选区复制行为。
+原型页顶栏使用年月日日期框，可切换归档中的指定逻辑日；「日报」页先展示今天完成的事项，辅助核验信息收在侧栏，并提供复制 Markdown、导出 PDF、下载分享图。复制按钮或按 `C` 复制分享版日报，`Ctrl/Cmd+C` 保留浏览器默认的选区复制行为。鼠标点击次数通过本地只读事件流获取，页面打开时立即建立连接，采集变化会在约 1 秒内更新；这项实时读取需要使用上面的 `prototype:serve`，普通静态服务器只会展示 fixture 中的快照。
 归档天数可作为第三个参数调整，例如 `... 2026-08-28 prototypes/dusk-ledger/fixture.js 14`。
 
 改了 `.jsx` 需要重新打包（`.css` 直接刷新即可）：
