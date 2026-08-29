@@ -54,7 +54,18 @@ bun run dev -- report
 ```
 
 当前 `goule scan` / `goule report` 已可输出事实层日报：包括 AI session、Git commit 统计、
-session↔commit 关联和未关联项；`notes`、LLM 润色及规则判定仍按上述设计文档逐步实现。
+session↔commit 关联和未关联项。日报支持 Markdown、JSON、可打印 HTML、A4 PDF 和分享 PNG/SVG：
+
+```bash
+goule report --format html --output report.html
+goule report --format pdf --output report.pdf
+goule report --format share --output goule-share.png
+goule report --format svg --output goule-share.svg
+```
+
+HTML 页面是本地自包含文件，不依赖外部图片或网络资源；PDF 使用项目内置的 Noto Sans SC
+简体中文字体子集，分享图默认只包含汇总数据，不包含路径、SHA 或对话正文。`notes`、LLM
+润色及规则判定仍按上述设计文档逐步实现。
 
 ### 鼠标点击活动（可选）
 

@@ -1,9 +1,5 @@
 import type { DayFactsLite } from '../scan'
-
-function formatMinutes(minutes: number): string {
-  if (minutes < 1) return `${Math.round(minutes * 60)} 分钟`
-  return `${minutes.toFixed(1)} 分钟`
-}
+import { formatMinutes } from './view'
 
 function commitLabel(commit: DayFactsLite['git']['repos'][number]['commits'][number]): string {
   // subject 已经包含原始 commit message；type/scope 是结构化字段，避免再次拼接导致重复。
