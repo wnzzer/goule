@@ -1,0 +1,27 @@
+{
+  "name": "goule",
+  "version": "0.0.1",
+  "description": "够了·到点下班：local-first work verification and daily report tool for developers",
+  "type": "module",
+  "bin": {
+    "goule": "src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "check": "bun run src/index.ts check",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wnzzer/goule.git"
+  },
+  "keywords": ["git", "developer-tools", "productivity", "local-first", "vibe-coding"],
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}
