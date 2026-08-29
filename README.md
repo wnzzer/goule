@@ -9,9 +9,10 @@
 🚧 **Phase 1 事实层已跑通，日报渲染器与规则引擎未实现。**
 
 已经能用：三个数据源（Claude Code / Codex session、本地 Git 提交、可选鼠标点击）
-→ `goule scan` 输出结构化 DayFacts，含 hands_on / agent 工时拆分、token 用量与压力信号。
+→ `goule scan` 输出结构化 DayFacts，含 hands_on / agent 工时拆分、session↔commit 关联、
+token 用量与压力信号；`goule report` 可导出 Markdown / JSON / HTML / PDF / 分享图。
 
-还没有：`goule report` 的渲染器（当前只打印占位）、规则引擎、`check`。
+还没有：规则引擎、`check`、LLM 润色层。
 **CLI 不下判定**——没有红绿灯、没有分数。
 
 > 桌面原型（`prototypes/dusk-ledger`）已经把结论层做到首屏，见下面「本地原型」。
@@ -66,7 +67,7 @@ bun run src/index.ts scan --date 2026-08-28  # 指定某一天
 `goule` 这个命令默认不在 PATH 上，需要 `bun link` 之后才能直接用
 `goule scan`；否则一律走 `bun run src/index.ts <命令>`。
 
-> `goule report` 的渲染器**尚未实现**，现在只会打印一行占位。想看数据用 `scan`。
+> `goule report` 的导出格式见下面「日报导出」。
 
 开发时：
 
@@ -97,6 +98,22 @@ cd prototypes/dusk-ledger && ./build.sh
 ```
 
 漏了第 ① 步页面不会白屏，会提示你该跑哪条命令。
+
+### 日报导出
+
+当前 `goule scan` / `goule report` 已可输出事实层日报：包括 AI session、Git commit 统计、
+session↔commit 关联和未关联项。日报支持 Markdown、JSON、可打印 HTML、A4 PDF 和分享 PNG/SVG：
+
+```bash
+goule report --format html --output report.html
+goule report --format pdf --output report.pdf
+goule report --format share --output goule-share.png
+goule report --format svg --output goule-share.svg
+```
+
+HTML 页面是本地自包含文件，不依赖外部图片或网络资源；PDF 使用项目内置的 Noto Sans SC
+简体中文字体子集，分享图默认只包含汇总数据，不包含路径、SHA 或对话正文。`notes`、LLM
+润色及规则判定仍按上述设计文档逐步实现。
 
 ### 鼠标点击活动（可选）
 
@@ -167,7 +184,7 @@ token 按**事件时间**归属到逻辑日，而不是把整份 session 文件�
 
 ## 规划
 
-- **Phase 1（当前）**：✅ Claude Code / Codex session + 本地 Git 三源打通；✅ hands_on / agent 工时拆分；✅ token 按事件时间归属；✅ 压力信号计算；⬜ 日报渲染器；⬜ LLM 润色层
+- **Phase 1（当前）**：✅ Claude Code / Codex session + 本地 Git 三源打通；✅ hands_on / agent 工时拆分；✅ token 按事件时间归属；✅ session↔commit 关联；✅ 压力信号计算；✅ 日报渲染与导出；⬜ LLM 润色层
 - **Phase 2**：规则引擎、产能分、`check`、**压力债 → 门槛折扣**、快照层、规则包与首周校准
 - **Phase 3**：本地 Dashboard、ActivityWatch、飞书元数据、规则市场
 - **后续**：Cursor 接入、周报聚合、定时提醒

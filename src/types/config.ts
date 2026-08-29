@@ -22,11 +22,12 @@ export interface MouseConfig {
 }
 
 export interface GitConfig {
-  enabled: boolean
-  /** session cwd 之外额外扫描的仓库根 */
-  extraRepos: string[]
-  /** 为空则每个仓库回退到自己的 user.email */
-  authorEmails: string[]
+  /** 递归扫描这些目录下的 Git 工作树。 */
+  repos: string[]
+  /** auto 使用每个仓库的 git config user.email；也可显式指定 author 匹配串。 */
+  author: 'auto' | string
+  /** 默认不把 merge commit 计入日报，但保留该开关以便审计。 */
+  excludeMerge: boolean
 }
 
 export interface Config {
@@ -37,9 +38,9 @@ export interface Config {
   sources: {
     claudeCode: { enabled: boolean; root: string }
     codex: { enabled: boolean; root: string }
-    git: GitConfig
   }
   mouse: MouseConfig
+  git: GitConfig
   stress: StressConfig
 }
 
@@ -51,12 +52,17 @@ export const DEFAULT_CONFIG: Config = {
   sources: {
     claudeCode: { enabled: true, root: join(homedir(), '.claude', 'projects') },
     codex: { enabled: true, root: join(homedir(), '.codex', 'sessions') },
-    git: { enabled: true, extraRepos: [], authorEmails: [] },
   },
   mouse: {
     enabled: false,
     provider: 'auto',
     persist: true,
+  },
+  git: {
+    // 没有配置加载器前，默认扫描启动 CLI 时所在的仓库；非 Git 目录会自动忽略。
+    repos: [process.cwd()],
+    author: 'auto',
+    excludeMerge: true,
   },
   stress: {
     halfLifeDays: 3,

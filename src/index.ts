@@ -1,16 +1,20 @@
 #!/usr/bin/env bun
 
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { Glob } from 'bun'
 import { DEFAULT_CONFIG, resolveTz } from './types/config'
 import { logicalDay } from './types/day'
 import { activityStatus, startActivity, stopActivity } from './mouse/service'
-import { runGit } from './git/log'
 import { scanDay } from './scan'
+import { renderReport } from './render/report'
+import { renderHtmlReport } from './render/html'
+import { renderPdfReport } from './render/pdf'
+import { renderSharePng, renderShareSvg } from './render/share'
 
 const command = Bun.argv[2] ?? "help";
 
-const help = `够了·到点下班（Goule）\n\nPhase 1（事实层）：\n  goule report [--date today] [--format md|json] [--polish] [--dry-run]\n  goule scan   [--date today]     输出原始 DayFacts JSON\n  goule notes  [--date today]     用 $EDITOR 编辑当日笔记\n  goule doctor                    数据源可达性诊断\n  goule activity start|stop|status  鼠标点击活动采集（默认关闭）\n\nPhase 2（规则引擎，尚未实现）：\n  goule init / check / rules / dashboard\n\n当前版本：项目骨架（Spec-First）\n设计文档：docs/superpowers/specs/2026-08-29-goule-phase1-design.md\n`;
+const help = `够了·到点下班（Goule）\n\nPhase 1（事实层）：\n  goule report [--date today] [--format md|json|html|pdf|share|svg] [--output path]\n  goule scan   [--date today]     输出原始 DayFacts JSON\n  goule notes  [--date today]     用 $EDITOR 编辑当日笔记\n  goule doctor                    数据源可达性诊断\n  goule activity start|stop|status  鼠标点击活动采集（默认关闭）\n\n导出示例：\n  goule report --format html --output report.html\n  goule report --format pdf --output report.pdf\n  goule report --format share --output goule-share.png\n\nPhase 2（规则引擎，尚未实现）：\n  goule init / check / rules / dashboard\n\n当前版本：项目骨架（Spec-First）\n设计文档：docs/superpowers/specs/2026-08-29-goule-phase1-design.md\n`;
 
 const phase2 = (name: string) =>
   console.error(`\`goule ${name}\` 属于 Phase 2（规则引擎），尚未实现。\n首期只呈现事实，不下结论 —— 试试 \`goule report\`。`);
@@ -40,6 +44,20 @@ async function countJsonl(root: string, pattern: string): Promise<number> {
   return n
 }
 
+type ReportFormat = 'md' | 'json' | 'html' | 'pdf' | 'share' | 'svg'
+
+function defaultReportPath(dayId: string, format: ReportFormat): string {
+  const suffix = format === 'share' ? 'png' : format
+  return resolve(`goule-report-${dayId}.${suffix}`)
+}
+
+async function writeReportOutput(path: string, content: string | Uint8Array): Promise<void> {
+  const target = resolve(path)
+  mkdirSync(dirname(target), { recursive: true })
+  await Bun.write(target, content)
+  console.error(`已导出：${target}`)
+}
+
 async function doctor(): Promise<void> {
   const tz = resolveTz(DEFAULT_CONFIG.timezone)
   console.log(`时区        ${tz}`)
@@ -65,14 +83,13 @@ async function doctor(): Promise<void> {
   for (const [name, status, root] of rows) {
     console.log(`${name.padEnd(12)}${status.padEnd(26)}${root}`)
   }
-  const git = DEFAULT_CONFIG.sources.git
-  if (!git.enabled) {
-    console.log(`${'Git'.padEnd(12)}已禁用`)
-  } else {
-    const v = await runGit(['--version'], process.cwd())
-    const author = git.authorEmails.length ? git.authorEmails.join(', ') : '各仓库 user.email'
-    console.log(`${'Git'.padEnd(12)}${(v.ok ? `✓ ${v.stdout.trim()}` : '✗ 不可用').padEnd(26)}  作者筛选：${author}`)
-  }
+  const git = DEFAULT_CONFIG.git
+  const proc = Bun.spawn(['git', '--version'], { stdout: 'pipe', stderr: 'pipe' })
+  const gitVersion = (await new Response(proc.stdout).text()).trim()
+  const gitOk = (await proc.exited) === 0
+  const author = git.author === 'auto' ? '各仓库 user.email' : git.author
+  console.log(`${'Git'.padEnd(12)}${(gitOk ? `✓ ${gitVersion}` : '✗ 不可用').padEnd(26)}  作者筛选：${author}`)
+  console.log(`${''.padEnd(12)}${'扫描根'.padEnd(24)}  ${git.repos.join(', ') || '（未配置）'}`)
 
   const mouse = activityStatus(DEFAULT_CONFIG)
   console.log('')
@@ -87,7 +104,37 @@ switch (command) {
     process.stdout.write(help);
     break;
   case "report":
-    console.log("Goule 日报渲染器即将实现。");
+    {
+      const format = argValue('--format') ?? 'md'
+      if (!['md', 'json', 'html', 'pdf', 'share', 'svg'].includes(format)) {
+        console.error(`--format 需为 md、json、html、pdf、share 或 svg，收到：${format}`)
+        process.exitCode = 1
+        break
+      }
+      if (Bun.argv.includes('--polish') || Bun.argv.includes('--dry-run')) {
+        console.error('polish / dry-run 尚未实现；当前 report 仅输出事实层。')
+        process.exitCode = 1
+        break
+      }
+      const dayId = targetDay()
+      const facts = await scanDay(dayId, DEFAULT_CONFIG)
+      const output = argValue('--output')
+      if (format === 'md' || format === 'json') {
+        const content = format === 'json' ? `${JSON.stringify(facts, null, 2)}\n` : renderReport(facts)
+        if (output) await writeReportOutput(output, content)
+        else process.stdout.write(content)
+      } else if (format === 'html') {
+        const content = renderHtmlReport(facts)
+        if (output) await writeReportOutput(output, content)
+        else process.stdout.write(content)
+      } else if (format === 'pdf') {
+        await writeReportOutput(output ?? defaultReportPath(dayId, 'pdf'), await renderPdfReport(facts))
+      } else if (format === 'svg') {
+        await writeReportOutput(output ?? defaultReportPath(dayId, 'svg'), renderShareSvg(facts))
+      } else {
+        await writeReportOutput(output ?? defaultReportPath(dayId, 'share'), renderSharePng(facts))
+      }
+    }
     break;
   case "scan": {
     const facts = await scanDay(targetDay(), DEFAULT_CONFIG)

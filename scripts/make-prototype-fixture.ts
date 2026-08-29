@@ -55,32 +55,41 @@ const data = {
     cacheRead: facts.tokens.cacheRead,
   },
   sessions,
+  // main 的 git 层形状：{ repos: RepoDay[], totals: GitTotals } + joined/unattributed
   git: {
-    enabled: facts.git.enabled,
-    insertions: facts.git.insertions,
-    deletions: facts.git.deletions,
+    enabled: facts.git.repos.length > 0,
+    insertions: facts.git.totals.insertions,
+    deletions: facts.git.totals.deletions,
     repos: facts.git.repos.map((r) => ({
       path: anonPath(r.path),
       name: r.name,
       branch: r.branch,
       commits: r.commits.length,
-      error: r.error,
+      error: null,
     })),
-    commits: facts.git.commits.map((c) => ({
-      hash: c.shortHash,
-      at: c.at,
-      repoName: c.repoName,
+    commits: facts.git.repos.flatMap((r) => r.commits.map((c) => ({
+      hash: c.sha.slice(0, 7),
+      at: c.ts,
+      repoName: r.name,
       subject: c.subject,
-      description: c.description,
+      // chip 已经显示 type(scope)，正文里去掉前缀免得重复
+      description: c.subject.replace(/^[A-Za-z]+(\([^)]*\))?!?:\s*/, ''),
       type: c.type,
       scope: c.scope,
-      breaking: c.breaking,
+      breaking: /^[A-Za-z]+(\([^)]*\))?!:/.test(c.subject),
       insertions: c.insertions,
       deletions: c.deletions,
       files: c.files,
-      copies: c.copies.length,
-      refs: c.refs,
-    })),
+      isMerge: c.isMerge,
+      copies: 0,
+      refs: [],
+    }))).sort((a, b) => a.at - b.at),
+  },
+  // session↔commit 关联（main 的 join.ts 产出），原型暂未渲染
+  joined: facts.joined.length,
+  unattributed: {
+    sessions: facts.unattributed.sessions.length,
+    commits: facts.unattributed.commits.length,
   },
 }
 

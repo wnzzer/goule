@@ -6,14 +6,16 @@ import { computeDebt } from './stress/debt'
 import { evaluateSignals, type DayInput, type Signal } from './stress/signals'
 import { buildActivity, type Activity } from './timeline/activity'
 import type { Block } from './timeline/blocks'
-import { scanGit } from './git'
-import type { GitFacts } from './git/types'
 import { loadMouseActivity } from './mouse/storage'
 import type { MouseProvider } from './mouse/types'
 import { MINUTE_MS, localDate, localParts, type Instant, type Tz } from './types/instant'
 import { dayRange, isWeekend, logicalDay, type DayRange } from './types/day'
 import { resolveTz, type Config } from './types/config'
 import { emptyTokens, sumTokens, type RawSession, type TokenUsage } from './types/session'
+import { joinScannedData, type JoinedFact, type UnattributedCommit, type UnattributedSession } from './git/join'
+import { discoverRepos } from './git/discover'
+import { scanGit } from './git/scanner'
+import type { GitTotals, RepoDay } from './git/types'
 
 export interface DayFactsLite {
   schemaVersion: 1
@@ -21,16 +23,17 @@ export interface DayFactsLite {
   boundary: { start: Instant; end: Instant; cutoffHour: number; tz: Tz }
   generatedAt: Instant
   activity: Activity
-  git: GitFacts
   stress: { signals: Signal[]; debt: number; baseline: Baseline }
   /** 当日 token 用量：按事件时间归属，不是把整份 session 文件记到今天 */
   tokens: TokenUsage
-  /** 只含当日有事件的 session；历史窗口里的 session 仅用于基线，不在此列 */
   sessions: Array<Pick<RawSession, 'id' | 'tool' | 'title' | 'cwd' | 'isSidechain'> & {
     branch: string | null
     minutes: number
     tokens: TokenUsage
   }>
+  git: { repos: RepoDay[]; totals: GitTotals }
+  joined: JoinedFact[]
+  unattributed: { sessions: UnattributedSession[]; commits: UnattributedCommit[] }
 }
 
 /** 以 dayId 结尾、向前数连续有活动的天数。当日无活动则为 0。 */
@@ -177,6 +180,10 @@ export async function scanDay(dayId: string, cfg: Config): Promise<DayFactsLite>
     }).handsOn.minutes)
   }
 
+  // 事实输出和 Git 关联只保留目标逻辑日内有事件的 session；历史 session
+  // 仍参与基线计算，但不应以 0 分钟条目污染当天日报，也不应抢走当天 commit 的归属。
+  const daySessions = sessions.filter((s) => s.events.some((e) => e.at >= range.start && e.at < range.end))
+
   const dayInput = deriveDayInput({
     dayId, range, tz,
     handsOnBlocks: activity.handsOn.blocks,
@@ -189,33 +196,39 @@ export async function scanDay(dayId: string, cfg: Config): Promise<DayFactsLite>
   const signals = evaluateSignals(dayInput, baseline, cfg.stress)
   const debt = computeDebt(signals, cfg.stress.halfLifeDays)
 
-  // 历史窗口里的 session 只服务基线，不属于今天
-  const todaySessions = sessions.filter((s) =>
-    s.events.some((e) => e.at >= range.start && e.at < range.end))
-
-  const git = await scanGit(
-    todaySessions.map((s) => s.cwd),
-    range,
-    cfg.sources.git,
+  const gitConfig = cfg.git ?? { repos: [], author: 'auto' as const, excludeMerge: true }
+  // 配置的扫描根之外，把今天真正工作过的 session cwd 向上找到的仓库也算进来。
+  // 只靠 cfg.git.repos（默认是 process.cwd()）会导致「从哪个目录跑就只看得见哪个仓库」，
+  // 在别的仓库干了一天却扫出 0 个提交。
+  const sessionRepos = discoverRepos(daySessions.map((s) => s.cwd))
+  const gitRoots = [...new Set([...gitConfig.repos, ...sessionRepos])]
+  const git = await scanGit(gitRoots, range, {
+    author: gitConfig.author,
+    excludeMerge: gitConfig.excludeMerge,
+  })
+  const join = await joinScannedData(
+    git.repos,
+    daySessions.map((s) => ({
+      session: s,
+      minutes: perSessionMinutes.get(s.file) ?? 0,
+    })),
+    cfg.idleGapMinutes * MINUTE_MS,
   )
 
-  const sessionRows = todaySessions.map((s) => ({
+  const sessionRows = daySessions.map((s) => ({
     id: s.id, tool: s.tool, title: s.title, cwd: s.cwd,
     isSidechain: s.isSidechain, branch: s.git?.branch ?? null,
     minutes: perSessionMinutes.get(s.file) ?? 0,
     tokens: sumTokens(s.tokenEvents, range.start, range.end),
   }))
 
-  const dayTokens = sessionRows.reduce<TokenUsage>(
-    (acc, r) => ({
-      input: acc.input + r.tokens.input,
-      output: acc.output + r.tokens.output,
-      cacheRead: acc.cacheRead + r.tokens.cacheRead,
-      cacheWrite: acc.cacheWrite + r.tokens.cacheWrite,
-      reasoning: acc.reasoning + r.tokens.reasoning,
-    }),
-    emptyTokens(),
-  )
+  const dayTokens = sessionRows.reduce<TokenUsage>((acc, r) => ({
+    input: acc.input + r.tokens.input,
+    output: acc.output + r.tokens.output,
+    cacheRead: acc.cacheRead + r.tokens.cacheRead,
+    cacheWrite: acc.cacheWrite + r.tokens.cacheWrite,
+    reasoning: acc.reasoning + r.tokens.reasoning,
+  }), emptyTokens())
 
   return {
     schemaVersion: 1,
@@ -223,9 +236,11 @@ export async function scanDay(dayId: string, cfg: Config): Promise<DayFactsLite>
     boundary: { start: range.start, end: range.end, cutoffHour: cfg.dayCutoffHour, tz },
     generatedAt: Date.now(),
     activity,
-    git,
     stress: { signals, debt, baseline },
     tokens: dayTokens,
     sessions: sessionRows,
+    git: { repos: git.repos, totals: git.totals },
+    joined: join.joined,
+    unattributed: join.unattributed,
   }
 }
