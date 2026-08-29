@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "bun run src/index.ts",
-    "check": "bun run src/index.ts check",
+    "report": "bun run src/index.ts report",
     "typecheck": "bunx tsc --noEmit"
   },
   "engines": {
