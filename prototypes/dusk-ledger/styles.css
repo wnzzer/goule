@@ -383,14 +383,17 @@ h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: 0; }
 
 .boot-hint {
   max-width: 520px; margin: 18vh auto; padding: 0 24px;
-  font-family: "Noto Sans SC", system-ui, sans-serif; color: #171a18;
+  font-family: "Noto Sans SC", system-ui, sans-serif;
 }
-.boot-hint h1 { font-size: 22px; font-weight: 500; margin: 0 0 12px; }
-.boot-hint p { font-size: 13px; line-height: 1.8; color: #67706a; margin: 0 0 14px; }
-.boot-hint p.dim { color: #949c96; font-size: 11.5px; }
+/* .app 没挂载时页面用的是 :root 的深色兜底，这里必须跟着走，
+   写死浅色 ink 会变成深底深字（看不见）。 */
+.boot-hint h1 { font-size: 22px; font-weight: 500; margin: 0 0 12px; color: var(--paper); }
+.boot-hint p { font-size: 13px; line-height: 1.8; color: var(--muted); margin: 0 0 14px; }
+.boot-hint p.dim { color: var(--faint); font-size: 11.5px; }
 .boot-hint code {
-  display: block; font: 12px "IBM Plex Mono"; background: #f5f6f4;
-  border: 1px solid #e6e9e6; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px;
+  display: block; font: 12px "IBM Plex Mono"; color: var(--paper);
+  background: var(--wash-strong); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px 12px; margin-bottom: 14px;
 }
 
 

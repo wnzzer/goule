@@ -6,9 +6,16 @@
 
 ## 状态
 
-🚧 **Phase 1 设计已冻结，实现中。**
+🚧 **Phase 1 事实层已跑通，日报渲染器与规则引擎未实现。**
 
-首期做**事实层**：读取本机 Claude Code 与 Codex 的 session 元数据、结合本地 Git 提交，产出一份「今天干了什么」的结构化日报，并计算压力信号。**首期不做判定**——没有红绿灯、没有分数、没有规则引擎。
+已经能用：三个数据源（Claude Code / Codex session、本地 Git 提交、可选鼠标点击）
+→ `goule scan` 输出结构化 DayFacts，含 hands_on / agent 工时拆分、token 用量与压力信号。
+
+还没有：`goule report` 的渲染器（当前只打印占位）、规则引擎、`check`。
+**CLI 不下判定**——没有红绿灯、没有分数。
+
+> 桌面原型（`prototypes/dusk-ledger`）已经把结论层做到首屏，见下面「本地原型」。
+> 那句结论由当天的 hands_on / P90 / 信号 / 提交推出，不引入分数，也不评效率。
 
 设计文档：[Phase 1 设计](docs/superpowers/specs/2026-08-29-goule-phase1-design.md) · [产品需求文档](docs/PRD.md)
 
@@ -44,16 +51,52 @@ Goule 因此把两个量分开，且**永不相加**：
 - **No keylogger**：不记录源码、按键内容或 IM 正文。
 - **事实层独立成立**：LLM 润色是叠加层而非替代层，生成内容在输出中必须可区分。
 
-## 快速开始（开发中）
+## 快速开始
 
 需要 [Bun](https://bun.sh/) 1.1+ 和 Git 2.30+：
 
 ```bash
 bun install
-bun run dev -- report
+
+bun run src/index.ts doctor                  # 数据源诊断，先跑这个确认环境
+bun run src/index.ts scan                    # 扫描今天，输出 DayFacts JSON
+bun run src/index.ts scan --date 2026-08-28  # 指定某一天
 ```
 
-当前为 CLI 骨架。Phase 1 的数据采集、时间轴与日报渲染按上述设计文档逐步实现。
+`goule` 这个命令默认不在 PATH 上，需要 `bun link` 之后才能直接用
+`goule scan`；否则一律走 `bun run src/index.ts <命令>`。
+
+> `goule report` 的渲染器**尚未实现**，现在只会打印一行占位。想看数据用 `scan`。
+
+开发时：
+
+```bash
+bun test              # 单元测试
+bun run typecheck     # bunx tsc --noEmit
+```
+
+### 本地原型（桌面端今日页）
+
+`prototypes/dusk-ledger` 是跑在**你自己机器真实扫描结果**上的高保真原型。
+fixture 含真实 session 与 commit 标题，因此不入库，克隆后需自己生成一次：
+
+```bash
+# ① 生成 fixture（不带日期就是今天）
+bun run scripts/make-prototype-fixture.ts 2026-08-28
+
+# ② 起静态服务
+python3 -m http.server 8912 --directory prototypes/dusk-ledger
+
+# ③ 打开 http://localhost:8912/index.html
+```
+
+改了 `.jsx` 需要重新打包（`.css` 直接刷新即可）：
+
+```bash
+cd prototypes/dusk-ledger && ./build.sh
+```
+
+漏了第 ① 步页面不会白屏，会提示你该跑哪条命令。
 
 ### 鼠标点击活动（可选）
 
@@ -115,11 +158,16 @@ token 按**事件时间**归属到逻辑日，而不是把整份 session 文件�
 | `CAUTION` | **差不多，你说了算** |
 | `NO_GO` | **证据还差点，再补一块** |
 
-> Verdict 属于 Phase 2。首期只呈现事实，不下结论。
+> **CLI 至今不产出 verdict**，`scan` 只给事实。
+>
+> 原型首屏已经有一句第一人称结论（「够了，今天可以收工。」「够了，早点下班。」
+> 「今天先停在这儿吧。」「今天手头很轻。」），它按当天的 hands_on 是否越过你自己的
+> P90、有没有信号触发、有没有提交落地来选，并附一句可执行的建议。
+> 不打分、不评效率，触发的信号写成「今天可以少做一点的理由」而不是罪状。
 
 ## 规划
 
-- **Phase 1（当前）**：Claude Code / Codex session + 本地 Git → 结构化日报；hands_on / agent 工时拆分；压力信号计算；可选 LLM 润色层
+- **Phase 1（当前）**：✅ Claude Code / Codex session + 本地 Git 三源打通；✅ hands_on / agent 工时拆分；✅ token 按事件时间归属；✅ 压力信号计算；⬜ 日报渲染器；⬜ LLM 润色层
 - **Phase 2**：规则引擎、产能分、`check`、**压力债 → 门槛折扣**、快照层、规则包与首周校准
 - **Phase 3**：本地 Dashboard、ActivityWatch、飞书元数据、规则市场
 - **后续**：Cursor 接入、周报聚合、定时提醒
