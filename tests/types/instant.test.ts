@@ -32,9 +32,35 @@ test('localToInstant 是 localDate/localHour 的逆运算', () => {
   expect(localHour(at, TZ)).toBe(4)
 })
 
-test('localToInstant 在有夏令时的时区也自洽', () => {
+test('localToInstant 在夏令时跳变当天自洽（春季前跳）', () => {
+  // 2026-03-08 是 America/New_York 春季跳变日；原测试用 03-15 在稳定 EDT 里，
+  // 名为 DST 测试却根本没触及 DST
   const tz = 'America/New_York'
-  const at = localToInstant(2026, 3, 15, 4, tz)
-  expect(localDate(at, tz)).toBe('2026-03-15')
+  const at = localToInstant(2026, 3, 8, 4, tz)
+  expect(localDate(at, tz)).toBe('2026-03-08')
   expect(localHour(at, tz)).toBe(4)
+})
+
+test('localToInstant 在夏令时跳变当天自洽（秋季回拨）', () => {
+  const tz = 'America/New_York'
+  const at = localToInstant(2026, 11, 1, 4, tz)
+  expect(localDate(at, tz)).toBe('2026-11-01')
+  expect(localHour(at, tz)).toBe(4)
+})
+
+test('parseInstant 拒绝无偏移的时间串，而非按本机时区解释', () => {
+  // Date.parse 的宽松回退会把这些按本机时区解释，Asia/Shanghai 下即 8 小时误差
+  expect(parseInstant('2026-08-29')).toBeNull()
+  expect(parseInstant('2026-08-29 10:00')).toBeNull()
+  expect(parseInstant('2026')).toBeNull()
+  expect(parseInstant('29 Aug 2026')).toBeNull()
+})
+
+test('parseInstant 拒绝首尾空格（宽松解析器会改变时区语义）', () => {
+  expect(parseInstant(' 2026-08-29T01:00:00Z ')).toBeNull()
+})
+
+test('parseInstant 接受带偏移的形式', () => {
+  expect(parseInstant('2026-08-29T01:00:00+08:00'))
+    .toBe(Date.parse('2026-08-29T01:00:00+08:00'))
 })

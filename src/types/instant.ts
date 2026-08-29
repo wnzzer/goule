@@ -7,7 +7,15 @@ export type Tz = string
 export const MINUTE_MS = 60_000
 export const HOUR_MS = 3_600_000
 
+/**
+ * 严格 ISO-8601 带偏移。必须严格：`Date.parse` 会退回 V8 的宽松解析器，
+ * 那里一个多余空格就会把 UTC 解释成本机时区（Asia/Shanghai 下即 8 小时误差）。
+ * 输入来自我们不控制、且格式可能变化的外部 session 文件，宁可丢弃也不能误解。
+ */
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+
 export function parseInstant(iso: string): Instant | null {
+  if (!ISO_INSTANT_RE.test(iso)) return null
   const t = Date.parse(iso)
   return Number.isNaN(t) ? null : t
 }
@@ -46,7 +54,7 @@ export function localParts(at: Instant, tz: Tz): LocalParts {
   }
 }
 
-const pad = (n: number): string => String(n).padStart(2, '0')
+export const pad = (n: number): string => String(n).padStart(2, '0')
 
 export function localDate(at: Instant, tz: Tz): string {
   const p = localParts(at, tz)

@@ -153,11 +153,37 @@ test('localToInstant 是 localDate/localHour 的逆运算', () => {
   expect(localHour(at, TZ)).toBe(4)
 })
 
-test('localToInstant 在有夏令时的时区也自洽', () => {
+test('localToInstant 在夏令时跳变当天自洽（春季前跳）', () => {
+  // 2026-03-08 是 America/New_York 春季跳变日；原测试用 03-15 在稳定 EDT 里，
+  // 名为 DST 测试却根本没触及 DST
   const tz = 'America/New_York'
-  const at = localToInstant(2026, 3, 15, 4, tz)
-  expect(localDate(at, tz)).toBe('2026-03-15')
+  const at = localToInstant(2026, 3, 8, 4, tz)
+  expect(localDate(at, tz)).toBe('2026-03-08')
   expect(localHour(at, tz)).toBe(4)
+})
+
+test('localToInstant 在夏令时跳变当天自洽（秋季回拨）', () => {
+  const tz = 'America/New_York'
+  const at = localToInstant(2026, 11, 1, 4, tz)
+  expect(localDate(at, tz)).toBe('2026-11-01')
+  expect(localHour(at, tz)).toBe(4)
+})
+
+test('parseInstant 拒绝无偏移的时间串，而非按本机时区解释', () => {
+  // Date.parse 的宽松回退会把这些按本机时区解释，Asia/Shanghai 下即 8 小时误差
+  expect(parseInstant('2026-08-29')).toBeNull()
+  expect(parseInstant('2026-08-29 10:00')).toBeNull()
+  expect(parseInstant('2026')).toBeNull()
+  expect(parseInstant('29 Aug 2026')).toBeNull()
+})
+
+test('parseInstant 拒绝首尾空格（宽松解析器会改变时区语义）', () => {
+  expect(parseInstant(' 2026-08-29T01:00:00Z ')).toBeNull()
+})
+
+test('parseInstant 接受带偏移的形式', () => {
+  expect(parseInstant('2026-08-29T01:00:00+08:00'))
+    .toBe(Date.parse('2026-08-29T01:00:00+08:00'))
 })
 ```
 
@@ -180,7 +206,15 @@ export type Tz = string
 export const MINUTE_MS = 60_000
 export const HOUR_MS = 3_600_000
 
+/**
+ * 严格 ISO-8601 带偏移。必须严格：`Date.parse` 会退回 V8 的宽松解析器，
+ * 那里一个多余空格就会把 UTC 解释成本机时区（Asia/Shanghai 下即 8 小时误差）。
+ * 输入来自我们不控制、且格式可能变化的外部 session 文件，宁可丢弃也不能误解。
+ */
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+
 export function parseInstant(iso: string): Instant | null {
+  if (!ISO_INSTANT_RE.test(iso)) return null
   const t = Date.parse(iso)
   return Number.isNaN(t) ? null : t
 }
@@ -219,7 +253,7 @@ export function localParts(at: Instant, tz: Tz): LocalParts {
   }
 }
 
-const pad = (n: number): string => String(n).padStart(2, '0')
+export const pad = (n: number): string => String(n).padStart(2, '0')
 
 export function localDate(at: Instant, tz: Tz): string {
   const p = localParts(at, tz)
@@ -251,7 +285,7 @@ export function localToInstant(
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `bun test tests/types/instant.test.ts`
-Expected: `7 pass  0 fail`
+Expected: `12 pass  0 fail`
 
 - [ ] **Step 5: 提交**
 
@@ -266,6 +300,15 @@ git commit -m "feat: Instant 类型与时区换算"
 
 设计文档 §4.1：`day_id "2026-08-28"` ≡ `[08-28 04:00, 08-29 04:00)` 本地时区。实测存在 17:52 → 次日 01:20 的 448 分钟连续块，按自然日切会腰斩。
 
+> **本任务修订于代码审查后（2026-08-29）。** 初版 `logicalDay` 写作
+> `localDate(at - cutoffHour * HOUR_MS, tz)`，在**绝对毫秒空间**做减法，而
+> `dayRange` 在**墙钟空间**锚定。DST 日两者差一个跳变量：实测 445 个 IANA
+> 时区的 DST 邻近日有 **160 处不一致**。后果不是简单的差一天，而是该瞬时
+> 既被 `logicalDay` 打上前一日标签、又落在前一日 `dayRange` 之外——按前者
+> 分桶、按后者裁剪的活动块会**凭空消失**，且消失的正是本设计要保护的跨夜
+> 长块。初版测试只用 `Asia/Shanghai`（1991 年后无 DST），该 bug 必然全绿
+> 逃逸。修订后的测试含 6 个 DST 时区的属性测试，旧实现下会有 4 个失败。
+
 **Files:**
 - Create: `src/types/day.ts`
 - Create: `tests/types/day.test.ts`
@@ -275,7 +318,7 @@ git commit -m "feat: Instant 类型与时区换算"
 创建 `tests/types/day.test.ts`：
 
 ```ts
-import { expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { logicalDay, dayRange, isWeekend } from '../../src/types/day'
 import { parseInstant, localDate, localHour } from '../../src/types/instant'
 
@@ -333,8 +376,61 @@ test('isWeekend 识别周六周日', () => {
   expect(isWeekend('2026-08-31')).toBe(false)  // 周一
 })
 
-test('dayRange 拒绝非法 dayId', () => {
-  expect(() => dayRange('2026-8-1', CUT, TZ)).toThrow()
+test('dayRange 拒绝形状非法的 dayId', () => {
+  expect(() => dayRange('2026-8-1', CUT, TZ)).toThrow(/非法 dayId/)
+})
+
+test('dayRange 拒绝取值非法的 dayId，而非静默滚动', () => {
+  // 仅查正则会放行这些，Date.UTC 静默滚动后产生自相矛盾的 DayRange
+  expect(() => dayRange('2026-02-30', CUT, TZ)).toThrow(/非法 dayId/)
+  expect(() => dayRange('2026-13-01', CUT, TZ)).toThrow(/非法 dayId/)
+  expect(() => dayRange('2026-00-10', CUT, TZ)).toThrow(/非法 dayId/)
+  expect(() => dayRange('0099-01-01', CUT, TZ)).toThrow(/非法 dayId/)
+})
+
+test('dayRange 拒绝非法 cutoffHour', () => {
+  expect(() => dayRange('2026-08-28', 24, TZ)).toThrow(/非法 cutoffHour/)
+  expect(() => dayRange('2026-08-28', -1, TZ)).toThrow(/非法 cutoffHour/)
+  expect(() => dayRange('2026-08-28', 4.5, TZ)).toThrow(/非法 cutoffHour/)
+})
+
+test('dayRange 正确跨月跨年', () => {
+  expect(logicalDay(dayRange('2026-01-31', CUT, TZ).end, CUT, TZ)).toBe('2026-02-01')
+  expect(logicalDay(dayRange('2026-12-31', CUT, TZ).end, CUT, TZ)).toBe('2027-01-01')
+  expect(logicalDay(dayRange('2028-02-28', CUT, TZ).end, CUT, TZ)).toBe('2028-02-29')  // 闰年
+})
+
+// ★ 这是能捕获「绝对毫秒 vs 墙钟空间」那类 bug 的属性测试。
+// 原测试只用 Asia/Shanghai（1991 年后无 DST），该 bug 必然全绿逃逸。
+describe('logicalDay 与 dayRange 在夏令时时区上必须自洽', () => {
+  const ZONES = ['America/New_York', 'Europe/Berlin', 'America/Santiago',
+                 'Australia/Lord_Howe', 'Pacific/Auckland', 'America/Adak']
+  const DAYS = ['2026-03-07', '2026-03-08', '2026-03-09',
+                '2026-10-31', '2026-11-01', '2026-11-02',
+                '2026-04-04', '2026-04-05', '2026-09-26', '2026-09-27']
+
+  for (const tz of ZONES) {
+    test(tz, () => {
+      for (const dayId of DAYS) {
+        const r = dayRange(dayId, CUT, tz)
+        // 区间内均匀采样，含两端
+        for (let i = 0; i <= 48; i++) {
+          const at = r.start + Math.floor((r.end - 1 - r.start) * (i / 48))
+          expect(logicalDay(at, CUT, tz)).toBe(dayId)
+        }
+        // 区间外一毫秒必须归属别的日子
+        expect(logicalDay(r.start - 1, CUT, tz)).not.toBe(dayId)
+        expect(logicalDay(r.end, CUT, tz)).not.toBe(dayId)
+      }
+    })
+  }
+})
+
+test('相邻逻辑日的区间必须严丝合缝相接', () => {
+  for (const tz of ['America/New_York', 'Asia/Shanghai', 'Australia/Lord_Howe']) {
+    expect(dayRange('2026-03-07', CUT, tz).end).toBe(dayRange('2026-03-08', CUT, tz).start)
+    expect(dayRange('2026-10-31', CUT, tz).end).toBe(dayRange('2026-11-01', CUT, tz).start)
+  }
 })
 ```
 
@@ -348,7 +444,7 @@ Expected: FAIL，报找不到模块 `../../src/types/day`
 创建 `src/types/day.ts`：
 
 ```ts
-import { HOUR_MS, localDate, localToInstant, type Instant, type Tz } from './instant'
+import { localDate, localParts, localToInstant, pad, type Instant, type Tz } from './instant'
 
 export interface DayRange {
   dayId: string
@@ -358,19 +454,54 @@ export interface DayRange {
   tz: Tz
 }
 
-/** 某瞬时属于哪个逻辑日。逻辑日从本地 cutoffHour 开始。 */
+interface DayParts { year: number; month: number; day: number }
+
+/**
+ * 形状与取值双重校验。仅查正则会放行 2026-02-30 / 2026-13-01，
+ * 它们经 Date.UTC 静默滚动后产生 logicalDay(r.start) !== r.dayId 的自相矛盾结构。
+ * year < 1000 的拒绝是为了避开 Date.UTC 把 0–99 映射到 1900+n 的历史行为。
+ */
+export function parseDayId(dayId: string): DayParts | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayId)
+  if (!m) return null
+  const year = Number(m[1]), month = Number(m[2]), day = Number(m[3])
+  if (year < 1000) return null
+  const d = new Date(Date.UTC(year, month - 1, day))
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() + 1 !== month || d.getUTCDate() !== day) return null
+  return { year, month, day }
+}
+
+function assertCutoff(cutoffHour: number): void {
+  if (!Number.isInteger(cutoffHour) || cutoffHour < 0 || cutoffHour > 23) {
+    throw new Error(`非法 cutoffHour: ${cutoffHour}（应为 0–23 的整数）`)
+  }
+}
+
+/**
+ * 某瞬时属于哪个逻辑日。逻辑日从本地 cutoffHour 开始。
+ *
+ * 必须在**墙钟空间**判断，不能写成 localDate(at - cutoffHour * HOUR_MS, tz)。
+ * 后者在绝对毫秒空间做减法，而 dayRange 在墙钟空间锚定，DST 日两者会差一个
+ * 跳变量：实测 445 个时区的 DST 邻近日有 160 处不一致。后果是该瞬时同时被
+ * logicalDay 打上前一日标签、又落在前一日 dayRange 之外——事件凭空消失。
+ */
 export function logicalDay(at: Instant, cutoffHour: number, tz: Tz): string {
-  return localDate(at - cutoffHour * HOUR_MS, tz)
+  const p = localParts(at, tz)
+  if (p.hour >= cutoffHour) return `${p.year}-${pad(p.month)}-${pad(p.day)}`
+  const prev = new Date(Date.UTC(p.year, p.month - 1, p.day - 1))
+  return `${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-${pad(prev.getUTCDate())}`
 }
 
 /** dayId（YYYY-MM-DD）→ 该逻辑日的 [start, end) 区间 */
 export function dayRange(dayId: string, cutoffHour: number, tz: Tz): DayRange {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayId)
-  if (!m) throw new Error(`非法 dayId: ${dayId}（应为 YYYY-MM-DD）`)
-  const year = Number(m[1]), month = Number(m[2]), day = Number(m[3])
+  assertCutoff(cutoffHour)
+  const parts = parseDayId(dayId)
+  if (!parts) throw new Error(`非法 dayId: ${dayId}（应为存在的 YYYY-MM-DD 日期）`)
+  const { year, month, day } = parts
 
   const start = localToInstant(year, month, day, cutoffHour, tz)
-  // 次日：用 UTC 算历法上的下一天，再解析回本地 cutoff
+  // 次日：用 UTC Date 纯粹当历法计算器（自动处理跨月跨年），结果立即经
+  // localToInstant 转回，不携带任何本地时间语义
   const nextUtc = new Date(Date.UTC(year, month - 1, day + 1))
   const end = localToInstant(
     nextUtc.getUTCFullYear(), nextUtc.getUTCMonth() + 1, nextUtc.getUTCDate(),
@@ -381,18 +512,20 @@ export function dayRange(dayId: string, cutoffHour: number, tz: Tz): DayRange {
 
 /** 该逻辑日是否为周末。dayId 已是本地日期，无需时区参数。 */
 export function isWeekend(dayId: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayId)
-  if (!m) throw new Error(`非法 dayId: ${dayId}`)
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  const parts = parseDayId(dayId)
+  if (!parts) throw new Error(`非法 dayId: ${dayId}`)
+  const d = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
   const dow = d.getUTCDay()
   return dow === 0 || dow === 6
 }
+
+export { localDate }
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `bun test tests/types/day.test.ts`
-Expected: `9 pass  0 fail`
+Expected: `19 pass  0 fail`
 
 - [ ] **Step 5: 提交**
 
