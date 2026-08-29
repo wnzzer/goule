@@ -72,6 +72,7 @@ test('scanGit 递归发现仓库并提取 commit、统计和 Conventional Commit
     type: 'feat',
     scope: 'parser',
     files: 1,
+    filesChanged: ['src.ts'],
     insertions: 1,
     deletions: 0,
     isMerge: false,

@@ -82,7 +82,7 @@ bun run typecheck     # bunx tsc --noEmit
 fixture 含真实 session 与 commit 标题，因此不入库，克隆后需自己生成一次：
 
 ```bash
-# ① 生成 fixture（不带日期就是今天）
+# ① 生成 fixture（不带日期就是今天，默认归档最近 7 个逻辑日）
 bun run scripts/make-prototype-fixture.ts 2026-08-28
 
 # ② 起静态服务
@@ -90,6 +90,9 @@ python3 -m http.server 8912 --directory prototypes/dusk-ledger
 
 # ③ 打开 http://localhost:8912/index.html
 ```
+
+原型页顶栏使用年月日日期框，可切换归档中的指定逻辑日；「日报」页先展示今天完成的事项，辅助核验信息收在侧栏，并提供复制 Markdown、导出 PDF、下载分享图。复制按钮或按 `C` 复制分享版日报，`Ctrl/Cmd+C` 保留浏览器默认的选区复制行为。
+归档天数可作为第三个参数调整，例如 `... 2026-08-28 prototypes/dusk-ledger/fixture.js 14`。
 
 改了 `.jsx` 需要重新打包（`.css` 直接刷新即可）：
 
@@ -102,7 +105,9 @@ cd prototypes/dusk-ledger && ./build.sh
 ### 日报导出
 
 当前 `goule scan` / `goule report` 已可输出事实层日报：包括 AI session、Git commit 统计、
-session↔commit 关联和未关联项。日报支持 Markdown、JSON、可打印 HTML、A4 PDF 和分享 PNG/SVG：
+session↔commit 关联和未关联项。日报会优先依据提交标题，再结合实际改动的相对文件范围，
+整理成“业务变化 + 具体需求 + 代码依据”，让不了解代码的人也能看懂；识别不到业务语义时
+会安全降级为原提交标题，不调用模型、不读取源码正文。日报支持 Markdown、JSON、可打印 HTML、A4 PDF 和分享 PNG/SVG：
 
 ```bash
 goule report --format html --output report.html
@@ -112,7 +117,7 @@ goule report --format svg --output goule-share.svg
 ```
 
 HTML 页面是本地自包含文件，不依赖外部图片或网络资源；PDF 使用项目内置的 Noto Sans SC
-简体中文字体子集，分享图默认只包含汇总数据，不包含路径、SHA 或对话正文。`notes`、LLM
+简体中文字体子集；分享图使用项目内置中文字体并以 2400×1800（2×）PNG 输出，默认只包含汇总数据，不包含路径、SHA 或对话正文。`notes`、LLM
 润色及规则判定仍按上述设计文档逐步实现。
 
 ### 鼠标点击活动（可选）

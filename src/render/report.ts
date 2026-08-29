@@ -1,4 +1,5 @@
 import type { DayFactsLite } from '../scan'
+import { businessOverview, summarizeBusinessChanges } from './business'
 import { formatMinutes } from './view'
 
 function commitLabel(commit: DayFactsLite['git']['repos'][number]['commits'][number]): string {
@@ -8,17 +9,46 @@ function commitLabel(commit: DayFactsLite['git']['repos'][number]['commits'][num
 
 /** 事实层 Markdown：只呈现可追溯数据，不生成 verdict 或模型文案。 */
 export function renderReport(facts: DayFactsLite): string {
+  const business = summarizeBusinessChanges(facts)
   const lines: string[] = [
     `# ${facts.dayId} 工作日报`,
+    '',
+    '## 今天做了什么',
+    ''
+  ]
+
+  if (business.length > 0) {
+    lines.push(`> ${businessOverview(business)}`, '')
+    for (const item of business) {
+      lines.push(`- **${item.title}**`)
+      lines.push(`  - 需求：${item.requirement}`)
+      lines.push(`  - 代码依据：\`${item.source}\`（${item.evidence}）`)
+    }
+  } else {
+    const titled = facts.sessions.filter((session) => session.title?.trim()).slice(0, 8)
+    if (titled.length > 0) {
+      for (const session of titled) lines.push(`- 进行中：${session.title!.trim()}（${session.branch ?? '未识别分支'} · ${formatMinutes(session.minutes)}）`)
+    } else {
+      lines.push(`- 今天没有可识别的交付项；${facts.sessions.length} 个 session 已保留在辅助信息中。`)
+    }
+  }
+
+  lines.push(
+    '',
+    '## 交付概览',
+    '',
+    `- Git commit：${facts.git.totals.commits} 个，${facts.git.totals.files} 个文件，+${facts.git.totals.insertions}/-${facts.git.totals.deletions}`,
+    `- 涉及仓库：${facts.git.repos.length} 个`,
+    '',
+    '## 今日事实',
     '',
     `- 真人投入：${formatMinutes(facts.activity.handsOn.minutes)}`,
     `- Agent 活动：${formatMinutes(facts.activity.agent.minutes)}`,
     `- AI session：${facts.sessions.length} 个`,
-    `- Git commit：${facts.git.totals.commits} 个，${facts.git.totals.files} 个文件，+${facts.git.totals.insertions}/-${facts.git.totals.deletions}`,
     '',
     '## Git 总结',
-    '',
-  ]
+    ''
+  )
 
   if (facts.git.repos.length === 0) {
     lines.push('今日没有发现已配置仓库的 commit。', '')
