@@ -11,8 +11,9 @@ import { renderReport } from './render/report'
 import { renderHtmlReport } from './render/html'
 import { renderPdfReport } from './render/pdf'
 import { renderSharePng, renderShareSvg } from './render/share'
+import { startDashboard } from './dashboard'
 
-const command = Bun.argv[2] ?? "help";
+const command = Bun.argv[2] ?? "dashboard";
 
 const help = `够了·到点下班（Goule）\n\nPhase 1（事实层）：\n  goule report [--date today] [--format md|json|html|pdf|share|svg] [--output path]\n  goule scan   [--date today]     输出原始 DayFacts JSON\n  goule notes  [--date today]     用 $EDITOR 编辑当日笔记\n  goule doctor                    数据源可达性诊断\n  goule activity start|stop|status  鼠标点击活动采集（默认关闭）\n\n导出示例：\n  goule report --format html --output report.html\n  goule report --format pdf --output report.pdf\n  goule report --format share --output goule-share.png\n\nPhase 2（规则引擎，尚未实现）：\n  goule init / check / rules / dashboard\n\n当前版本：项目骨架（Spec-First）\n设计文档：docs/superpowers/specs/2026-08-29-goule-phase1-design.md\n`;
 
@@ -168,10 +169,20 @@ switch (command) {
     }
     break
   }
+  case "dashboard": {
+    const portRaw = argValue('--port')
+    const port = portRaw ? Number(portRaw) : 8912
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+      console.error(`--port 需为 1024–65535 的整数，收到：${portRaw}`)
+      process.exitCode = 1
+      break
+    }
+    await startDashboard(targetDay(), port, !Bun.argv.includes('--no-open'))
+    break
+  }
   case "init":
   case "check":
   case "rules":
-  case "dashboard":
     phase2(command);
     process.exitCode = 1;
     break;
