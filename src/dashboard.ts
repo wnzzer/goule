@@ -13,7 +13,9 @@ export async function startDashboard(day: string, port = 8912, openBrowser = tru
   const server = Bun.serve({ hostname: '127.0.0.1', port, async fetch(req) {
     const u = new URL(req.url); const pathname = u.pathname === '/' ? '/index.html' : u.pathname
     const file = Bun.file(resolve(PROTOTYPE, `.${pathname}`))
-    return (await file.exists()) ? new Response(file) : new Response('Not Found', { status: 404 })
+    return (await file.exists())
+      ? new Response(file, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
+      : new Response('Not Found', { status: 404 })
   }})
   const url = `http://${server.hostname}:${server.port}/`
   console.log(`Goule Dashboard 已启动：${url}`)

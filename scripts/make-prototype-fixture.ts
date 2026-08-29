@@ -54,6 +54,7 @@ async function toFixture(facts: DayFactsLite) {
 
   const data = {
     dayId: facts.dayId,
+    generatedAt: facts.generatedAt,
     boundary: { start: facts.boundary.start, end: facts.boundary.end },
     handBlocks: facts.activity.handsOn.blocks.map((b) => [b.start, b.end]),
     agentBlocks: facts.activity.agent.blocks.map((b) => [b.start, b.end]),

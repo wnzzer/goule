@@ -7,7 +7,7 @@ const ICON_MARK = `<g opacity="0.14"><path d="M134 260A122 122 0 0 0 378 260" st
 
 /** 放进另一个 SVG 里的定位分组，左上角对齐 (x, y)，边长 size。 */
 export function gouleIconGroup(x: number, y: number, size: number): string {
-  return `<g transform="translate(${x} ${y}) scale(${size / 512})">${ICON_MARK}</g>`
+  return `<g data-goule-logo="true" transform="translate(${x} ${y}) scale(${size / 512})">${ICON_MARK}</g>`
 }
 
 /** HTML 内联使用的独立 svg 元素。 */

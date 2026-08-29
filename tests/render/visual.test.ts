@@ -39,6 +39,7 @@ test('分享图 SVG 不泄露路径和 SHA', () => {
   const svg = renderShareSvg(facts)
   expect(svg.startsWith('<svg')).toBe(true)
   expect(svg).toContain('2026-08-29 工作日报')
+  expect(svg).toContain('data-goule-logo="true"')
   expect(svg).toContain('feat: add report export')
   expect(svg).not.toContain('/tmp/work')
   expect(svg).not.toContain('1234567890abcdef')

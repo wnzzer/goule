@@ -648,13 +648,18 @@ const reportText = [
 
 function Report({ onCopy, copied }) {
   const allQuiet = D.signals.every(s => !s.fired);
+  const versionedExport = path => {
+    if (!path || !D.generatedAt) return path;
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}v=${D.generatedAt}`;
+  };
   return <div className="report-wrap">
     <div className="report-tools">
       <span>先看今天做成了什么，旁边信息用于核对</span>
       <div className="report-actions">
         <button className="copy-btn" onClick={onCopy}>{copied ? "已复制" : "复制 Markdown"}</button>
-        {D.exports?.pdf && <a className="copy-btn export-link" href={D.exports.pdf} download>导出 PDF</a>}
-        {D.exports?.sharePng && <a className="copy-btn export-link" href={D.exports.sharePng} download>下载分享图</a>}
+        {D.exports?.pdf && <a className="copy-btn export-link" href={versionedExport(D.exports.pdf)} download>导出 PDF</a>}
+        {D.exports?.sharePng && <a className="copy-btn export-link" href={versionedExport(D.exports.sharePng)} download>下载分享图</a>}
       </div>
     </div>
     <article className="report-paper">
