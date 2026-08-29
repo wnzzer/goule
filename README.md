@@ -105,7 +105,9 @@ cd prototypes/dusk-ledger && ./build.sh
 ### 日报导出
 
 当前 `goule scan` / `goule report` 已可输出事实层日报：包括 AI session、Git commit 统计、
-session↔commit 关联和未关联项。日报支持 Markdown、JSON、可打印 HTML、A4 PDF 和分享 PNG/SVG：
+session↔commit 关联和未关联项。日报会优先依据提交标题，再结合实际改动的相对文件范围，
+整理成“业务变化 + 具体需求 + 代码依据”，让不了解代码的人也能看懂；识别不到业务语义时
+会安全降级为原提交标题，不调用模型、不读取源码正文。日报支持 Markdown、JSON、可打印 HTML、A4 PDF 和分享 PNG/SVG：
 
 ```bash
 goule report --format html --output report.html
@@ -115,7 +117,7 @@ goule report --format svg --output goule-share.svg
 ```
 
 HTML 页面是本地自包含文件，不依赖外部图片或网络资源；PDF 使用项目内置的 Noto Sans SC
-简体中文字体子集，分享图默认只包含汇总数据，不包含路径、SHA 或对话正文。`notes`、LLM
+简体中文字体子集；分享图使用项目内置中文字体并以 2400×1800（2×）PNG 输出，默认只包含汇总数据，不包含路径、SHA 或对话正文。`notes`、LLM
 润色及规则判定仍按上述设计文档逐步实现。
 
 ### 鼠标点击活动（可选）

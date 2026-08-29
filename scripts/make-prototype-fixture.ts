@@ -12,6 +12,7 @@ import { DEFAULT_CONFIG, resolveTz } from '../src/types/config'
 import { logicalDay, parseDayId } from '../src/types/day'
 import { renderPdfReport } from '../src/render/pdf'
 import { renderSharePng, renderShareSvg } from '../src/render/share'
+import { summarizeCommit } from '../src/render/business'
 import { scanDay, type DayFactsLite } from '../src/scan'
 import { totalTokens, uncachedInput } from '../src/types/session'
 import { dirname, join } from 'node:path'
@@ -91,6 +92,8 @@ async function toFixture(facts: DayFactsLite) {
         description: c.subject.replace(/^[A-Za-z]+(\([^)]*\))?!?:\s*/, ''),
         type: c.type,
         scope: c.scope,
+        filesChanged: c.filesChanged ?? [],
+        business: summarizeCommit(c, r.name),
         breaking: /^[A-Za-z]+(\([^)]*\))?!:/.test(c.subject),
         insertions: c.insertions,
         deletions: c.deletions,

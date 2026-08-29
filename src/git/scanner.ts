@@ -99,6 +99,27 @@ function parseNumstat(lines: string[]): Pick<GitCommit, 'files' | 'insertions' |
 }
 
 /**
+ * 读取提交实际改动的相对路径。路径和 numstat 分开取，避免让统计解析
+ * 依赖 git 输出格式的组合顺序；失败时不影响原有提交统计。
+ */
+function parseNameOnly(stdout: string, range: DayRange): Map<string, string[]> {
+  const pathsBySha = new Map<string, string[]>()
+  for (const raw of stdout.split('\x1e')) {
+    const record = raw.replace(/^\n+/, '')
+    if (!record.trim()) continue
+    const lines = record.split('\n')
+    const header = lines.shift() ?? ''
+    const [sha, authorRaw] = header.split('\x1f')
+    if (!sha || !authorRaw) continue
+    const ts = Date.parse(authorRaw)
+    if (!Number.isFinite(ts) || ts < range.start || ts >= range.end || pathsBySha.has(sha)) continue
+    const paths = lines.map((line) => line.trim()).filter(Boolean)
+    pathsBySha.set(sha, paths)
+  }
+  return pathsBySha
+}
+
+/**
  * 合并 cherry-pick / rebase 产生的副本。
  *
  * 扫 --all 会同时看到 feature 分支上的原件和 pick 到 dev 之后的副本：
@@ -202,11 +223,28 @@ async function scanRepository(
 
   const result = await runGit(repoPath, args)
   if (result.code !== 0) return null
+  let commits = parseLog(result.stdout, range)
+
+  // --name-only 会替代 --numstat，因此单独跑一遍轻量日志，把业务摘要需要的
+  // 文件范围补到 commit 上；这是每个仓库额外一次调用，而不是每个 commit 一次。
+  if (commits.length > 0) {
+    const nameArgs = args
+      .filter((arg) => arg !== '--numstat' && !arg.startsWith('--format='))
+    nameArgs.push('--format=%x1e%H%x1f%aI', '--name-only')
+    const names = await runGit(repoPath, nameArgs)
+    if (names.code === 0) {
+      const pathsBySha = parseNameOnly(names.stdout, range)
+      commits = commits.map((commit) => {
+        const paths = pathsBySha.get(commit.sha)
+        return paths ? { ...commit, filesChanged: paths } : commit
+      })
+    }
+  }
   return {
     path: repoPath,
     name: basename(repoPath),
     branch,
-    commits: parseLog(result.stdout, range),
+    commits,
   }
 }
 

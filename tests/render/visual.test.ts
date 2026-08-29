@@ -28,6 +28,8 @@ test('HTML 日报包含图文模块和内联数据', () => {
   expect(html).toContain('<!doctype html>')
   expect(html).toContain('真人投入时段')
   expect(html).toContain('feat: add report export')
+  expect(html).toContain('日报导出与分享')
+  expect(html).toContain('让用户可以把日报导出成 PDF 或生成分享图')
   expect(html).toContain('补充导出')
   expect(html).toContain('鼠标点击')
   expect(html).not.toContain('https://')
@@ -45,6 +47,9 @@ test('分享图 SVG 不泄露路径和 SHA', () => {
 test('分享图 PNG 和 PDF 都能生成有效文件', async () => {
   const png = renderSharePng(facts)
   expect(Array.from(png.slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
+  const pngHeader = new DataView(png.buffer, png.byteOffset, png.byteLength)
+  expect(pngHeader.getUint32(16)).toBe(2400)
+  expect(pngHeader.getUint32(20)).toBe(1800)
 
   const pdf = await renderPdfReport(facts)
   expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe('%PDF-')

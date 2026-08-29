@@ -13,6 +13,8 @@ export interface GitCommit {
   type: string | null
   scope: string | null
   files: number
+  /** 当日提交实际改动的相对路径；旧数据或采集失败时为空。 */
+  filesChanged?: string[]
   insertions: number
   deletions: number
   isMerge: boolean

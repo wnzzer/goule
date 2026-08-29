@@ -2,7 +2,8 @@ import PDFDocument from 'pdfkit'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DayFactsLite } from '../scan'
-import { dayFactsMouse, finite, formatMinutes, hourMax, hourValues, titleForSession, topCommits } from './view'
+import { summarizeBusinessChanges } from './business'
+import { dayFactsMouse, finite, formatMinutes, hourMax, hourValues, titleForSession } from './view'
 
 const FONT_CANDIDATES = [
   process.env.GOULE_PDF_FONT,
@@ -27,21 +28,6 @@ function textValue(value: unknown): string {
 function shorten(value: unknown, max: number): string {
   const text = textValue(value)
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
-
-const actionLabel: Record<string, string> = {
-  feat: '新增',
-  fix: '修复',
-  refactor: '重构',
-  perf: '优化',
-  docs: '补充文档',
-  test: '补充测试',
-  chore: '整理',
-}
-
-function workTitle(commit: DayFactsLite['git']['repos'][number]['commits'][number]): string {
-  const subject = commit.subject.replace(/^[A-Za-z]+(\([^)]*\))?!?:\s*/, '')
-  return `${commit.type && actionLabel[commit.type] ? `${actionLabel[commit.type]}：` : ''}${subject}`
 }
 
 function drawSectionTitle(doc: PDFKit.PDFDocument, title: string, y: number): number {
@@ -94,17 +80,18 @@ export async function renderPdfReport(facts: DayFactsLite): Promise<Uint8Array> 
   y = baseY + 28
 
   y = drawSectionTitle(doc, '今天做了什么', y)
-  const commits = topCommits(facts, 8)
-  if (commits.length === 0) {
+  const business = summarizeBusinessChanges(facts, 8)
+  if (business.length === 0) {
     doc.fillColor('#667085').fontSize(9).text('今天没有发现已配置仓库的 commit。', 48, y)
     y += 20
   } else {
-    for (const commit of commits) {
-      if (y > 735) { doc.addPage(); y = 48; y = drawSectionTitle(doc, '今天做了什么（续）', y) }
-      doc.fillColor('#4169e1').fontSize(8).text((commit.type ?? 'commit').toUpperCase(), 48, y, { width: 54 })
-      doc.fillColor('#172033').fontSize(9).text(shorten(workTitle(commit), 72), 108, y, { width: 330, height: 16, ellipsis: true })
-      doc.fillColor('#7b8496').fontSize(7).text(`${commit.files} 文件 · +${commit.insertions}/-${commit.deletions}`, 448, y, { width: 100, align: 'right' })
-      y += 18
+    for (const item of business) {
+      if (y > 700) { doc.addPage(); y = 48; y = drawSectionTitle(doc, '今天做了什么（续）', y) }
+      doc.fillColor('#4169e1').fontSize(8).text(String(item.title).slice(0, 18), 48, y, { width: 54, height: 16, ellipsis: true })
+      doc.fillColor('#172033').fontSize(9).text(shorten(`需求：${item.requirement}`, 88), 108, y, { width: 330, height: 18, ellipsis: true })
+      doc.fillColor('#7b8496').fontSize(7).text(shorten(`依据：${item.source}`, 27), 448, y, { width: 100, height: 16, align: 'right', ellipsis: true })
+      doc.fillColor('#7b8496').fontSize(7).text(shorten(item.evidence, 86), 108, y + 20, { width: 440, height: 14, ellipsis: true })
+      y += 40
     }
   }
 

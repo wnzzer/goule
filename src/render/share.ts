@@ -1,34 +1,18 @@
 import { Resvg } from '@resvg/resvg-js'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import type { DayFactsLite } from '../scan'
+import { summarizeBusinessChanges } from './business'
 import { dayFactsMouse, escapeXml, formatCompactMinutes, hourMax, hourValues } from './view'
 
-const actionLabel: Record<string, string> = {
-  feat: '新增',
-  fix: '修复',
-  refactor: '重构',
-  perf: '优化',
-  docs: '文档',
-  test: '测试',
-  chore: '整理',
-}
-
-type Commit = DayFactsLite['git']['repos'][number]['commits'][number]
+const SHARE_FONT_FILES = [
+  join(import.meta.dir, '../../node_modules/@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff'),
+  join(import.meta.dir, '../../node_modules/@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-700-normal.woff'),
+].filter((path) => existsSync(path))
 
 function shorten(value: unknown, max: number): string {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim()
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
-
-function shareWorkTitle(commit: Commit): string {
-  // 把 Conventional Commit 前缀翻译成更容易转发给非开发同事看的动作词，
-  // 同时保留原始 subject 在 <title> 中，便于无障碍读取与事实追溯。
-  const subject = commit.subject.replace(/^[A-Za-z]+(\([^)]*\))?!?:\s*/, '')
-  const action = commit.type && actionLabel[commit.type]
-  return `${action || '完成'}：${subject || '未命名变更'}`
-}
-
-function workMeta(commit: Commit, repoName: string): string {
-  return `${repoName || '未识别仓库'} · ${commit.files} 个文件 · +${commit.insertions}/−${commit.deletions}`
 }
 
 function metricCard(x: number, label: string, value: string, detail: string, color: string): string {
@@ -50,14 +34,12 @@ export function renderShareSvg(facts: DayFactsLite): string {
   const mouse = dayFactsMouse(facts)
   const hours = hourValues(facts)
   const max = hourMax(hours)
-  const commits = facts.git.repos
-    .flatMap((repo) => repo.commits.map((commit) => ({ repoName: repo.name, commit })))
-    .sort((a, b) => (b.commit.insertions + b.commit.deletions) - (a.commit.insertions + a.commit.deletions) || b.commit.ts - a.commit.ts)
-    .slice(0, 4)
+  const business = summarizeBusinessChanges(facts, 5)
+  const totalCommitCount = facts.git.totals.commits || business.length
   const titledSessions = facts.sessions.filter((session) => session.title?.trim()).slice(0, 3)
   const joined = facts.joined.reduce((sum, item) => sum + item.commitShas.length, 0)
-  const workItems = commits.length > 0
-    ? commits.map(({ repoName, commit }) => ({ title: shareWorkTitle(commit), meta: workMeta(commit, repoName), source: commit.subject }))
+  const workItems = business.length > 0
+    ? business.map((item) => ({ title: item.title, meta: `需求：${item.requirement}`, source: item.source }))
     : titledSessions.map((session) => ({
         title: `进行中：${session.title!.trim()}`,
         meta: `${session.branch ?? '未识别分支'} · ${formatCompactMinutes(session.minutes)}`,
@@ -66,14 +48,14 @@ export function renderShareSvg(facts: DayFactsLite): string {
 
   const workRows = workItems.length > 0
     ? workItems.map((item, index) => {
-        const y = 526 + index * 68
+        const y = 526 + index * 54
         return `<g>
   <circle cx="91" cy="${y - 7}" r="17" fill="#e5f5ee"/>
   <text x="91" y="${y - 1}" text-anchor="middle" class="work-index">${String(index + 1).padStart(2, '0')}</text>
   <title>${escapeXml(item.source)}</title>
   <text x="122" y="${y - 8}" class="work-title">${escapeXml(shorten(item.title, 47))}</text>
   <text x="122" y="${y + 18}" class="work-meta">${escapeXml(shorten(item.meta, 58))}</text>
-  ${index < workItems.length - 1 ? `<line x1="72" y1="${y + 38}" x2="780" y2="${y + 38}" stroke="#e6eee9"/>` : ''}
+  ${index < workItems.length - 1 ? `<line x1="72" y1="${y + 30}" x2="780" y2="${y + 30}" stroke="#e6eee9"/>` : ''}
 </g>`
       }).join('')
     : `<text x="72" y="526" class="empty">今天没有可识别的交付项</text>`
@@ -89,10 +71,10 @@ export function renderShareSvg(facts: DayFactsLite): string {
     return `<rect x="${x}" y="${barBaseY - height}" width="${barWidth}" height="${height}" rx="3" fill="${value > 0 ? '#0a8f6a' : '#dce9e2'}"/>`
   }).join('')
 
-  const completionLabel = commits.length > 0 ? `${commits.length} 项交付` : workItems.length > 0 ? '进行中' : '暂无交付'
+  const completionLabel = totalCommitCount > 0 ? `${totalCommitCount} 项交付` : workItems.length > 0 ? '进行中' : '暂无交付'
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900" role="img" aria-labelledby="share-title share-desc">
 <title id="share-title">${escapeXml(facts.dayId)} 工作日报</title>
-<desc id="share-desc">今天完成 ${facts.git.totals.commits} 项代码交付，包含 ${facts.git.totals.repos} 个仓库和 ${facts.sessions.length} 个 AI session。</desc>
+<desc id="share-desc">今天完成 ${totalCommitCount} 项代码交付，包含 ${facts.git.totals.repos} 个仓库和 ${facts.sessions.length} 个 AI session。</desc>
 <rect width="1200" height="900" fill="#f3f7f4"/>
 <rect x="32" y="28" width="1136" height="844" rx="28" fill="#ffffff" stroke="#dfe9e3" stroke-width="2"/>
 <rect x="32" y="28" width="8" height="844" rx="4" fill="#0a8f6a"/>
@@ -108,7 +90,7 @@ export function renderShareSvg(facts: DayFactsLite): string {
 <text x="978" y="98" class="status">${escapeXml(completionLabel)}</text>
 
 <text x="72" y="180" class="title">${escapeXml(facts.dayId)} 工作日报</text>
-<text x="72" y="216" class="subtitle">今天完成 ${facts.git.totals.commits} 项代码交付，以下是可以直接分享的进展。</text>
+<text x="72" y="216" class="subtitle">今天完成 ${totalCommitCount} 项代码交付，以下是可以直接分享的进展。</text>
 
 ${metricCard(72, '提交', `${facts.git.totals.commits} 个`, '今天落地的改动', '#0a8f6a')}
 ${metricCard(334, '改动行数', `${facts.git.totals.insertions + facts.git.totals.deletions} 行`, `+${facts.git.totals.insertions} / −${facts.git.totals.deletions}`, '#3978a5')}
@@ -161,5 +143,19 @@ ${workRows}
 }
 
 export function renderSharePng(facts: DayFactsLite): Uint8Array {
-  return new Resvg(renderShareSvg(facts), { fitTo: { mode: 'width', value: 1200 } }).render().asPng()
+  // 以 2× 尺寸导出，分享平台缩放后仍能保持中文笔画和数字边缘清楚。
+  // 显式加载项目内 Noto Sans SC，避免机器缺少中文字体时发生替换或变形。
+  return new Resvg(renderShareSvg(facts), {
+    fitTo: { mode: 'width', value: 2400 },
+    shapeRendering: 2,
+    textRendering: 1,
+    font: {
+      loadSystemFonts: true,
+      fontFiles: SHARE_FONT_FILES,
+      fontDirs: ['/System/Library/Fonts', '/Library/Fonts', '/usr/share/fonts', '/usr/local/share/fonts'],
+      defaultFontFamily: 'Noto Sans SC',
+      sansSerifFamily: 'Noto Sans SC',
+      monospaceFamily: 'IBM Plex Mono',
+    },
+  }).render().asPng()
 }

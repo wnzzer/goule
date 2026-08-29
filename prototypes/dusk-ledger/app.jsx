@@ -1,4 +1,4 @@
-const { useEffect, useMemo, useState } = React;
+const { useEffect, useMemo, useRef, useState } = React;
 const { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakColor } = window;
 
 // fixture.js 由 scripts/make-prototype-fixture.ts 从真实 scanDay 输出生成。
@@ -529,25 +529,41 @@ function Recovery() {
 // 日报先回答“今天做了什么”，工时、token 和压力信号放到辅助信息，
 // 这样复制或分享时，读者先看到交付结果，而不是一串自我核对的数字。
 const COMMIT_ACTION_LABEL = { feat: "新增", fix: "修复", refactor: "重构", perf: "优化", docs: "补充文档", test: "补充测试", chore: "整理" };
-function commitWorkTitle(c) {
-  const raw = (c.description || c.subject || "未命名变更").replace(/^[A-Za-z]+(\([^)]*\))?!?:\s*/, "");
-  return `${COMMIT_ACTION_LABEL[c.type] ? `${COMMIT_ACTION_LABEL[c.type]}：` : ""}${raw}`;
-}
 function commitWorkMeta(c) {
   return `${c.repoName || "未识别仓库"} · ${c.files} 个文件 · +${c.insertions}/−${c.deletions}`;
 }
+function fallbackBusiness(c) {
+  const source = c.subject || c.description || "未命名变更";
+  const subject = source.replace(/^[A-Za-z]+(\([^)]*\))?!?:\s*/, "").replace(/^(?:add|improve|update|fix|remove|support)\b[\s:,-]*/i, "").replace(/[-_]+/g, " ").trim() || "未命名变更";
+  const lower = source.toLowerCase();
+  if (/mouse|click/.test(lower)) return { title: "新增：鼠标点击活动采集", requirement: "补充鼠标点击次数作为在场参考；它独立展示，不计入工时，也不参与压力判断。", area: "鼠标活动参考", source, evidence: commitWorkMeta(c) };
+  if (/visual report|report export|share image|pdf/.test(lower)) return { title: "新增：日报导出与分享", requirement: "让用户可以把日报导出成 PDF 或生成分享图，方便保存、转发和向别人说明进展。", area: "日报导出与分享", source, evidence: commitWorkMeta(c) };
+  if (/daily report|date navigation|archive/.test(lower)) return { title: "优化：日报内容与历史归档", requirement: "让日报先讲清今天完成了什么，并支持按指定日期查看历史归档。", area: "日报内容与归档", source, evidence: commitWorkMeta(c) };
+  if (/git daily summary|git summary|session join|join.*session/.test(lower)) return { title: "新增：Git 交付总结与 AI session 关联", requirement: "把 Git 提交整理成可读的交付摘要，并说明 AI session 如何落到具体代码提交。", area: "Git 交付与 AI 关联", source, evidence: commitWorkMeta(c) };
+  const action = COMMIT_ACTION_LABEL[c.type] || "完成";
+  return { title: `${action}：${subject}`, requirement: `本次改动围绕「${subject}」展开，具体范围以提交依据为准。`, area: "代码交付", source, evidence: commitWorkMeta(c) };
+}
 const TITLED_SESSIONS = D.sessions.filter(s => s.title && s.title.trim()).slice(0, 8);
-const REPORT_WORK_ITEMS = COMMITS.map(c => ({ kind: "commit", key: c.hash, title: commitWorkTitle(c), meta: commitWorkMeta(c), commit: c }));
+const REPORT_WORK_ITEMS = COMMITS.map(c => {
+  const business = c.business || fallbackBusiness(c);
+  return { kind: "commit", key: c.hash, title: business.title, requirement: business.requirement, area: business.area, source: business.source || c.subject, evidence: business.evidence || commitWorkMeta(c), meta: commitWorkMeta(c), commit: c };
+});
 const REPORT_IN_PROGRESS = TITLED_SESSIONS
   .filter(s => !REPORT_WORK_ITEMS.some(item => item.title.toLowerCase() === s.title.trim().toLowerCase()))
   .map(s => ({ key: s.id, title: s.title.trim(), meta: `${s.branch || "未识别分支"} · ${s.minutes >= 1 ? fmtDur(s.minutes * MIN) : "刚开始"}` }));
+const REPORT_AREAS = [...new Set(REPORT_WORK_ITEMS.map(item => item.area).filter(Boolean))].slice(0, 3);
+const REPORT_OVERVIEW = REPORT_WORK_ITEMS.length
+  ? `今天完成 ${REPORT_WORK_ITEMS.length} 项业务变化，主要涉及${REPORT_AREAS.join("、")}。`
+  : "今天没有可归纳的代码交付。";
 
 const reportText = [
   `# ${D.dayId} · 开发活动日报`,
   "",
   "## 今天做了什么",
+  `> ${REPORT_OVERVIEW}`,
+  "",
   ...(REPORT_WORK_ITEMS.length
-    ? REPORT_WORK_ITEMS.map(item => `- ${item.title}（${item.meta}）`)
+    ? REPORT_WORK_ITEMS.flatMap(item => [`- **${item.title}**`, `  - 需求：${item.requirement}`, `  - 代码依据：\`${item.source}\`（${item.evidence}）`])
     : REPORT_IN_PROGRESS.length
       ? REPORT_IN_PROGRESS.map(item => `- 进行中：${item.title}（${item.meta}）`)
       : [`- 今天没有可识别的交付项；${D.sessions.length} 个 session 已保留在辅助信息中。`]),
@@ -574,17 +590,17 @@ function Report({ onCopy, copied }) {
     <article className="report-paper">
       <div className="report-meta">GOULE DAILY · {D.dayId}</div>
       <h2>今天做了什么</h2>
-      <p>今天完成 {COMMITS.length} 项代码变更，涉及 {D.git.repos.length} 个仓库。</p>
+      <p>{REPORT_OVERVIEW} 代码提交保留在每条记录下方，方便继续核对。</p>
       <hr className="report-rule"/>
       <div className="report-grid">
         <div className="report-primary">
           <section className="report-section">
-            <h3>完成项</h3>
+            <h3>业务变化</h3>
             {REPORT_WORK_ITEMS.length
               ? <ol className="report-work-list">{REPORT_WORK_ITEMS.map((item, index) =>
                   <li className="report-work-item" key={item.key}>
                     <span className="report-work-index">{String(index + 1).padStart(2, "0")}</span>
-                    <span className="report-work-copy"><strong>{item.title}</strong><small>{item.meta}</small></span>
+                    <span className="report-work-copy"><strong>{item.title}</strong><small className="report-requirement">需求：{item.requirement}</small><small className="report-evidence">依据：{item.source} · {item.evidence}</small></span>
                   </li>)}
                 </ol>
               : <p className="report-empty">今天没有 Git 提交落地。</p>}
@@ -745,6 +761,7 @@ function Hero() {
 function App() {
   const [view, setView] = useState("verify");
   const [copied, setCopied] = useState(false);
+  const datePickerRef = useRef(null);
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const palette = PALETTES[t.palette[0]] || PALETTES["#62D6A7"];
   const theme = THEMES[t.theme] || THEMES.night;
@@ -778,19 +795,30 @@ function App() {
   const previousDay = archiveDays[currentDayIndex - 1];
   const nextDay = archiveDays[currentDayIndex + 1];
   const changeDay = day => navigateToDay(day);
+  const weekday = new Intl.DateTimeFormat("zh-CN", { weekday: "short" })
+    .format(new Date(`${D.dayId}T12:00:00Z`));
+  const openDatePicker = event => {
+    if (event.target === datePickerRef.current) return;
+    event.preventDefault();
+    const picker = datePickerRef.current;
+    if (!picker) return;
+    if (typeof picker.showPicker === "function") picker.showPicker();
+    else { picker.focus(); picker.click(); }
+  };
 
   return <div className={`app density-${t.density} theme-${t.theme}`} style={cssVars}>
     <header className="topbar">
       <div className="brand">
         <button className="brand-home" onClick={() => setView("verify")} aria-label="返回足迹首页">
           <svg className="brand-mark" viewBox="0 0 32 32" fill="none"><path d="M7 5h18v18l-5 5H7V5Z" stroke="currentColor" strokeWidth="1.5"/><path d="M12 11h8M12 16h5M20 23v5" stroke="currentColor" strokeWidth="1.5"/></svg>
+          <strong>Goule</strong>
         </button>
-        <strong>Goule</strong>
       </div>
       <div className="date-nav">
         <button className="icon-btn" disabled={!previousDay} onClick={() => changeDay(previousDay)} aria-label="前一天"><Icon name="left"/></button>
-        <label className="date-picker-wrap">
+        <label className="date-picker-wrap" onClick={openDatePicker}>
           <input
+            ref={datePickerRef}
             className="date-picker"
             type="date"
             aria-label="选择归档日期"
@@ -799,6 +827,7 @@ function App() {
             max={archiveDays[archiveDays.length - 1]}
             onChange={e => changeDay(e.target.value)}
           />
+          <span className="date-weekday" aria-hidden="true">{weekday}</span>
         </label>
         <button className="icon-btn" disabled={!nextDay} onClick={() => changeDay(nextDay)} aria-label="后一天"><Icon name="right"/></button>
       </div>

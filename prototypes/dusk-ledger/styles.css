@@ -43,12 +43,14 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--mint);
   padding: 18px 40px; border-bottom: 1px solid var(--line); margin-bottom: 52px;
 }
 .brand { display: flex; align-items: center; gap: 9px; }
-.brand-home { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--mint); cursor: pointer; }
+.brand-home { display: flex; align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; color: var(--mint); cursor: pointer; }
+.brand-home strong { color: var(--paper); }
+.brand-home:hover strong { color: var(--mint); }
 .brand-mark { width: 22px; height: 22px; color: var(--mint); }
 .brand strong { font-size: 15px; font-weight: 600; }
 .date-nav { display: flex; align-items: center; gap: 6px; justify-self: center; }
 .date-picker-wrap {
-  display: flex; align-items: center; width: 136px; height: 26px;
+  display: flex; align-items: center; gap: 5px; width: 148px; height: 26px;
   padding: 0 6px 0 8px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--wash); cursor: pointer; transition: .16s ease;
 }
@@ -57,6 +59,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--mint);
   min-width: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; color: var(--paper);
   font: 500 11.5px "IBM Plex Mono"; line-height: 1; letter-spacing: -.02em; cursor: pointer; outline: none; color-scheme: dark;
 }
+.date-weekday { flex: none; color: var(--muted); font-size: 10px; white-space: nowrap; }
 .date-picker::-webkit-calendar-picker-indicator { width: 13px; height: 13px; padding: 0; opacity: .62; cursor: pointer; filter: invert(1); margin-left: 3px; }
 .theme-pure .date-picker, .theme-cafe .date-picker, .theme-warm .date-picker { color-scheme: light; }
 .theme-pure .date-picker::-webkit-calendar-picker-indicator,
@@ -220,6 +223,8 @@ h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: 0; }
 .report-work-copy { display: grid; gap: 4px; min-width: 0; }
 .report-work-copy strong { color: var(--report-ink); font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
 .report-work-copy small, .report-progress-list small { color: color-mix(in srgb, var(--report-ink) 56%, transparent); font: 11px "IBM Plex Mono"; line-height: 1.55; overflow-wrap: anywhere; }
+.report-work-copy .report-requirement { color: color-mix(in srgb, var(--report-ink) 78%, transparent); font: 12px/1.7 "Noto Sans SC", "PingFang SC", sans-serif; }
+.report-work-copy .report-evidence { font-size: 10px; }
 .report-empty { margin: 0 !important; padding: 12px 0; border-top: 1px solid var(--report-rule); }
 .report-progress-list li { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--report-rule); }
 .report-progress-list li:first-child { border-top: 0; padding-top: 0; }
@@ -316,7 +321,7 @@ h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: 0; }
   .ledger-detail { grid-template-columns: 1fr; padding: 0 34px 18px; }
 }
 @media (max-width: 560px) {
-  .date-picker-wrap { width: 130px; }
+  .date-picker-wrap { width: 138px; gap: 4px; padding-left: 7px; padding-right: 5px; }
   .hero-aside { grid-template-columns: 1fr; }
   .signal { grid-template-columns: minmax(0,1fr) auto; }
   .signal-threshold { grid-column: 2; text-align: right; }
