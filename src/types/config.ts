@@ -21,6 +21,15 @@ export interface MouseConfig {
   persist: boolean
 }
 
+export interface GitConfig {
+  /** 递归扫描这些目录下的 Git 工作树。 */
+  repos: string[]
+  /** auto 使用每个仓库的 git config user.email；也可显式指定 author 匹配串。 */
+  author: 'auto' | string
+  /** 默认不把 merge commit 计入日报，但保留该开关以便审计。 */
+  excludeMerge: boolean
+}
+
 export interface Config {
   dayCutoffHour: number
   idleGapMinutes: number
@@ -31,6 +40,7 @@ export interface Config {
     codex: { enabled: boolean; root: string }
   }
   mouse: MouseConfig
+  git: GitConfig
   stress: StressConfig
 }
 
@@ -47,6 +57,12 @@ export const DEFAULT_CONFIG: Config = {
     enabled: false,
     provider: 'auto',
     persist: true,
+  },
+  git: {
+    // 没有配置加载器前，默认扫描启动 CLI 时所在的仓库；非 Git 目录会自动忽略。
+    repos: [process.cwd()],
+    author: 'auto',
+    excludeMerge: true,
   },
   stress: {
     halfLifeDays: 3,

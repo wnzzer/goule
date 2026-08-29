@@ -6,6 +6,7 @@ import { DEFAULT_CONFIG, resolveTz } from './types/config'
 import { logicalDay } from './types/day'
 import { activityStatus, startActivity, stopActivity } from './mouse/service'
 import { scanDay } from './scan'
+import { renderReport } from './render/report'
 
 const command = Bun.argv[2] ?? "help";
 
@@ -77,7 +78,21 @@ switch (command) {
     process.stdout.write(help);
     break;
   case "report":
-    console.log("Goule 日报渲染器即将实现。");
+    {
+      const format = argValue('--format') ?? 'md'
+      if (format !== 'md' && format !== 'json') {
+        console.error(`--format 需为 md 或 json，收到：${format}`)
+        process.exitCode = 1
+        break
+      }
+      if (Bun.argv.includes('--polish') || Bun.argv.includes('--dry-run')) {
+        console.error('polish / dry-run 尚未实现；当前 report 仅输出事实层。')
+        process.exitCode = 1
+        break
+      }
+      const facts = await scanDay(targetDay(), DEFAULT_CONFIG)
+      process.stdout.write(format === 'json' ? `${JSON.stringify(facts, null, 2)}\n` : renderReport(facts))
+    }
     break;
   case "scan": {
     const facts = await scanDay(targetDay(), DEFAULT_CONFIG)

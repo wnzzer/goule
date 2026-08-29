@@ -12,6 +12,9 @@ import { MINUTE_MS, localDate, localParts, type Instant, type Tz } from './types
 import { dayRange, isWeekend, logicalDay, type DayRange } from './types/day'
 import { resolveTz, type Config } from './types/config'
 import type { RawSession } from './types/session'
+import { joinScannedData, type JoinedFact, type UnattributedCommit, type UnattributedSession } from './git/join'
+import { scanGit } from './git/scanner'
+import type { GitTotals, RepoDay } from './git/types'
 
 export interface DayFactsLite {
   schemaVersion: 1
@@ -24,6 +27,9 @@ export interface DayFactsLite {
     branch: string | null
     minutes: number
   }>
+  git: { repos: RepoDay[]; totals: GitTotals }
+  joined: JoinedFact[]
+  unattributed: { sessions: UnattributedSession[]; commits: UnattributedCommit[] }
 }
 
 /** 以 dayId 结尾、向前数连续有活动的天数。当日无活动则为 0。 */
@@ -170,6 +176,10 @@ export async function scanDay(dayId: string, cfg: Config): Promise<DayFactsLite>
     }).handsOn.minutes)
   }
 
+  // 事实输出和 Git 关联只保留目标逻辑日内有事件的 session；历史 session
+  // 仍参与基线计算，但不应以 0 分钟条目污染当天日报，也不应抢走当天 commit 的归属。
+  const daySessions = sessions.filter((s) => s.events.some((e) => e.at >= range.start && e.at < range.end))
+
   const dayInput = deriveDayInput({
     dayId, range, tz,
     handsOnBlocks: activity.handsOn.blocks,
@@ -182,6 +192,20 @@ export async function scanDay(dayId: string, cfg: Config): Promise<DayFactsLite>
   const signals = evaluateSignals(dayInput, baseline, cfg.stress)
   const debt = computeDebt(signals, cfg.stress.halfLifeDays)
 
+  const gitConfig = cfg.git ?? { repos: [], author: 'auto' as const, excludeMerge: true }
+  const git = await scanGit(gitConfig.repos, range, {
+    author: gitConfig.author,
+    excludeMerge: gitConfig.excludeMerge,
+  })
+  const join = await joinScannedData(
+    git.repos,
+    daySessions.map((s) => ({
+      session: s,
+      minutes: perSessionMinutes.get(s.file) ?? 0,
+    })),
+    cfg.idleGapMinutes * MINUTE_MS,
+  )
+
   return {
     schemaVersion: 1,
     dayId,
@@ -189,10 +213,13 @@ export async function scanDay(dayId: string, cfg: Config): Promise<DayFactsLite>
     generatedAt: Date.now(),
     activity,
     stress: { signals, debt, baseline },
-    sessions: sessions.map((s) => ({
+    sessions: daySessions.map((s) => ({
       id: s.id, tool: s.tool, title: s.title, cwd: s.cwd,
       isSidechain: s.isSidechain, branch: s.git?.branch ?? null,
       minutes: perSessionMinutes.get(s.file) ?? 0,
     })),
+    git: { repos: git.repos, totals: git.totals },
+    joined: join.joined,
+    unattributed: join.unattributed,
   }
 }
