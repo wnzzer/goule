@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "bun run src/index.ts",
+    "prototype:serve": "bun run scripts/serve-prototype.ts",
     "report": "bun run src/index.ts report",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test"

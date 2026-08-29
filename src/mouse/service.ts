@@ -7,6 +7,7 @@ import { startMacMouseCollector, type RunningMouseCollector } from './macos'
 import { readMouseRecord, writeMouseRecordAsync } from './storage'
 
 const PID_FILE = 'mouse-collector.pid'
+const FLUSH_INTERVAL_MS = 1_000
 
 function pidPath(root = GOULE_DIR): string {
   return join(root, 'activity', PID_FILE)
@@ -141,7 +142,8 @@ export async function startActivity(cfg: Config): Promise<void> {
     throw error
   }
 
-  const timer = setInterval(() => { void flushNow() }, 30_000)
+  // 页面通过本地事件流读取聚合文件；1 秒刷新一次，让点击变化能近实时呈现。
+  const timer = setInterval(() => { void flushNow() }, FLUSH_INTERVAL_MS)
   let shuttingDown = false
   const shutdown = async (persist = true) => {
     if (shuttingDown) return

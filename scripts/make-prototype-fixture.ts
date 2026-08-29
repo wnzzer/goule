@@ -103,8 +103,14 @@ async function toFixture(facts: DayFactsLite) {
         refs: [],
       }))).sort((a, b) => a.at - b.at),
     },
-    // session↔commit 关联（main 的 join.ts 产出），原型暂未渲染
-    joined: facts.joined.length,
+    // session↔commit 关联：缺少原始标题时，用关联提交的业务需求解释这段工作。
+    joined: facts.joined.map((item) => ({
+      repo: item.repo,
+      branch: item.branch,
+      confidence: item.confidence,
+      sessionIds: item.sessionIds.map((id) => id.slice(0, 8)),
+      commitShas: item.commitShas.map((sha) => sha.slice(0, 7)),
+    })),
     unattributed: {
       sessions: facts.unattributed.sessions.length,
       commits: facts.unattributed.commits.length,

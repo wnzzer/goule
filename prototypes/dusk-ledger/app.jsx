@@ -282,6 +282,27 @@ function buildGroups() {
     b.commits.length - a.commits.length || b.minutes - a.minutes);
 }
 const GROUPS = buildGroups();
+const SESSION_LINKS = Array.isArray(D.joined) ? D.joined : [];
+
+function sessionWorkDescription(s) {
+  if (s.title && s.title.trim()) return s.title.trim();
+
+  const linkedShas = new Set(
+    SESSION_LINKS
+      .filter(link => link.sessionIds.includes(s.id))
+      .flatMap(link => link.commitShas),
+  );
+  const linkedCommits = COMMITS.filter(c => linkedShas.has(c.hash));
+  if (linkedCommits.length > 0) {
+    const requirements = [...new Set(linkedCommits.map(c => (c.business || fallbackBusiness(c)).requirement))];
+    const suffix = requirements.length > 1 ? `；另关联 ${requirements.length - 1} 项需求` : "";
+    return `对应需求：${requirements[0]}${suffix}`;
+  }
+
+  return s.branch
+    ? `${s.branch} 分支上的需求实现与代码处理`
+    : "当前项目的需求梳理与实现";
+}
 
 function CommitRow({ c, scale }) {
   return <div className="commit-row">
@@ -299,10 +320,11 @@ function CommitRow({ c, scale }) {
 
 function SessionRow({ s, maxMin, maxOut }) {
   const t = s.tokens;
+  const description = sessionWorkDescription(s);
   return <div className="session-row">
     <span className="session-tool">{s.tool === "claude-code" ? "CC" : "CX"}</span>
-    <span className="session-title">
-      {s.title || <em className="empty-note">这段没有标题（原始记录没有提供）</em>}
+    <span className="session-title" title={description}>
+      {description}
       {s.isSidechain && <span className="session-tag">subagent</span>}
     </span>
     <MiniBar value={s.minutes} max={maxMin} tone="a"/>
@@ -434,8 +456,44 @@ function Tokens() {
 // ── 按小时分布：动手与点击各一张小倍数，同一条 24 小时坐标轴 ────────
 const COVERAGE_LABEL = { complete: "完整", partial: "部分", unavailable: "不可用" };
 
+function useLiveMouse(dayId, initialMouse) {
+  const [mouse, setMouse] = useState(initialMouse);
+
+  useEffect(() => {
+    let active = true;
+    const apply = next => {
+      if (
+        active
+        && typeof next?.clicks === "number"
+        && typeof next?.observedMinutes === "number"
+        && Array.isArray(next?.byHour)
+        && next.byHour.length === 24
+      ) {
+        setMouse(next);
+      }
+    };
+
+    const params = new URLSearchParams({ date: dayId });
+    const events = new EventSource(`./api/activity/stream?${params}`);
+    events.onmessage = event => {
+      try {
+        apply(JSON.parse(event.data));
+      } catch {
+        // 忽略单条损坏事件，EventSource 会继续接收后续状态。
+      }
+    };
+
+    return () => {
+      active = false;
+      events.close();
+    };
+  }, [dayId]);
+
+  return mouse;
+}
+
 function Hourly() {
-  const m = D.mouse;
+  const m = useLiveMouse(D.dayId, D.mouse);
   const handTotal = D.handsOnByHour.reduce((a, b) => a + b, 0);
   const activeHours = D.handsOnByHour.filter(v => v > 0).length;
   const peak = D.handsOnByHour.indexOf(Math.max(...D.handsOnByHour));
