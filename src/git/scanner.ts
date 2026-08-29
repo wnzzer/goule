@@ -98,18 +98,52 @@ function parseNumstat(lines: string[]): Pick<GitCommit, 'files' | 'insertions' |
   return { files, insertions, deletions }
 }
 
+/**
+ * 合并 cherry-pick / rebase 产生的副本。
+ *
+ * 扫 --all 会同时看到 feature 分支上的原件和 pick 到 dev 之后的副本：
+ * hash 不同，但 author date 与标题被 cherry-pick 原样保留。实测某日 4 条
+ * 提交里有 2 对是这种副本，不合并会让「今天提交了几个」翻倍。
+ * 副本不丢弃，记入 copies。
+ */
+function mergeCopies(commits: GitCommit[]): GitCommit[] {
+  const groups = new Map<string, GitCommit[]>()
+  const order: string[] = []
+  for (const c of commits) {
+    const key = `${c.ts}\u0000${c.subject}`
+    const g = groups.get(key)
+    if (g) g.push(c)
+    else { groups.set(key, [c]); order.push(key) }
+  }
+  return order.map((key) => {
+    const g = groups.get(key)!
+    // committerTs 最早的是原件；相同则按 sha 稳定排序
+    const sorted = [...g].sort((a, b) =>
+      (a.committerTs ?? a.ts) - (b.committerTs ?? b.ts) || a.sha.localeCompare(b.sha))
+    const primary = sorted[0]!
+    const copies = sorted.slice(1).map((c) => c.sha)
+    return copies.length ? { ...primary, copies } : primary
+  })
+}
+
 function parseLog(stdout: string, range: DayRange): GitCommit[] {
   const commits: GitCommit[] = []
+  const seen = new Set<string>()
   for (const raw of stdout.split('\x1e')) {
     const record = raw.replace(/^\n+/, '')
     if (!record.trim()) continue
     const lines = record.split('\n')
     const header = lines.shift() ?? ''
-    const [sha, tsRaw, subjectRaw, parentsRaw] = header.split('\x1f')
-    if (!sha || !tsRaw || subjectRaw === undefined) continue
-    const ts = Date.parse(tsRaw)
+    const [sha, authorRaw, committerRaw, subjectRaw, parentsRaw] = header.split('\x1f')
+    if (!sha || !authorRaw || subjectRaw === undefined) continue
+    // 按 author date 归属：rebase / amend 会重写 committer date，
+    // 用后者会把几天前写的代码算到今天。
+    const ts = Date.parse(authorRaw)
     if (!Number.isFinite(ts) || ts < range.start || ts >= range.end) continue
+    if (seen.has(sha)) continue // --all 让同一提交在多个 ref 下重复出现
+    seen.add(sha)
 
+    const committerTs = Date.parse(committerRaw ?? '')
     const parents = (parentsRaw ?? '').trim().split(/\s+/).filter(Boolean)
     const subject = subjectRaw.trim()
     const stats = parseNumstat(lines)
@@ -117,6 +151,7 @@ function parseLog(stdout: string, range: DayRange): GitCommit[] {
     commits.push({
       sha,
       ts,
+      committerTs: Number.isFinite(committerTs) ? committerTs : ts,
       subject,
       type: conventional.type,
       scope: conventional.scope,
@@ -124,7 +159,7 @@ function parseLog(stdout: string, range: DayRange): GitCommit[] {
       isMerge: parents.length > 1,
     })
   }
-  return commits.sort((a, b) => a.ts - b.ts || a.sha.localeCompare(b.sha))
+  return mergeCopies(commits).sort((a, b) => a.ts - b.ts || a.sha.localeCompare(b.sha))
 }
 
 async function repoBranch(repoPath: string): Promise<string> {
@@ -151,11 +186,16 @@ async function scanRepository(
 ): Promise<RepoDay | null> {
   const branch = await repoBranch(repoPath)
   const author = await repoAuthor(repoPath, options.author)
+  // --all：只看 HEAD 可达会漏掉「在 feature 分支上干完就切回 master」的提交，
+  //   实测某日 2 个提交全在别的分支上，HEAD 视角扫出 0 条。
+  // 窗口两侧各放宽 14 天：--since/--until 走的是 committer date，而归属按
+  //   author date，rebase 会让两者相差数日；精确过滤在 parseLog 里做。
+  const margin = 14 * 86_400_000
   const args = [
-    'log', '--no-color', '--no-renames', '--root',
-    `--since=${new Date(range.start - 1000).toISOString()}`,
-    `--until=${new Date(range.end + 1000).toISOString()}`,
-    '--format=%x1e%H%x1f%cI%x1f%s%x1f%P', '--numstat',
+    'log', '--all', '--no-color', '--no-renames', '--root',
+    `--since=${new Date(range.start - margin).toISOString()}`,
+    `--until=${new Date(range.end + margin).toISOString()}`,
+    '--format=%x1e%H%x1f%aI%x1f%cI%x1f%s%x1f%P', '--numstat',
   ]
   if (author) args.push(`--author=${escapeGitAuthor(author)}`)
   if (options.excludeMerge) args.push('--no-merges')
