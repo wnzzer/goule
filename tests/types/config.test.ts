@@ -24,3 +24,20 @@ test('resolveTz 对 auto 返回系统时区', () => {
 test('resolveTz 透传显式时区', () => {
   expect(resolveTz('Asia/Shanghai')).toBe('Asia/Shanghai')
 })
+
+test('GOULE_TZ 覆盖 auto 和显式配置', () => {
+  const before = process.env.GOULE_TZ
+  process.env.GOULE_TZ = 'UTC'
+  try {
+    expect(resolveTz('auto')).toBe('UTC')
+    expect(resolveTz('Asia/Shanghai')).toBe('UTC')
+  } finally {
+    if (before === undefined) delete process.env.GOULE_TZ
+    else process.env.GOULE_TZ = before
+  }
+})
+
+test('鼠标采集默认关闭且启用持久化', () => {
+  expect(DEFAULT_CONFIG.mouse.enabled).toBe(false)
+  expect(DEFAULT_CONFIG.mouse.persist).toBe(true)
+})

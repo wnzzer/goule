@@ -4,11 +4,12 @@ import { existsSync, statSync } from 'node:fs'
 import { Glob } from 'bun'
 import { DEFAULT_CONFIG, resolveTz } from './types/config'
 import { logicalDay } from './types/day'
+import { activityStatus, startActivity, stopActivity } from './mouse/service'
 import { scanDay } from './scan'
 
 const command = Bun.argv[2] ?? "help";
 
-const help = `够了·到点下班（Goule）\n\nPhase 1（事实层）：\n  goule report [--date today] [--format md|json] [--polish] [--dry-run]\n  goule scan   [--date today]     输出原始 DayFacts JSON\n  goule notes  [--date today]     用 $EDITOR 编辑当日笔记\n  goule doctor                    数据源可达性诊断\n\nPhase 2（规则引擎，尚未实现）：\n  goule init / check / rules / dashboard\n\n当前版本：项目骨架（Spec-First）\n设计文档：docs/superpowers/specs/2026-08-29-goule-phase1-design.md\n`;
+const help = `够了·到点下班（Goule）\n\nPhase 1（事实层）：\n  goule report [--date today] [--format md|json] [--polish] [--dry-run]\n  goule scan   [--date today]     输出原始 DayFacts JSON\n  goule notes  [--date today]     用 $EDITOR 编辑当日笔记\n  goule doctor                    数据源可达性诊断\n  goule activity start|stop|status  鼠标点击活动采集（默认关闭）\n\nPhase 2（规则引擎，尚未实现）：\n  goule init / check / rules / dashboard\n\n当前版本：项目骨架（Spec-First）\n设计文档：docs/superpowers/specs/2026-08-29-goule-phase1-design.md\n`;
 
 const phase2 = (name: string) =>
   console.error(`\`goule ${name}\` 属于 Phase 2（规则引擎），尚未实现。\n首期只呈现事实，不下结论 —— 试试 \`goule report\`。`);
@@ -63,6 +64,10 @@ async function doctor(): Promise<void> {
   for (const [name, status, root] of rows) {
     console.log(`${name.padEnd(12)}${status.padEnd(26)}${root}`)
   }
+  const mouse = activityStatus(DEFAULT_CONFIG)
+  console.log('')
+  console.log(`鼠标采集    ${mouse.running ? `✓ 运行中（pid ${mouse.pid}）` : '未运行'}`)
+  console.log(`今日点击    ${mouse.clicks} 次（${mouse.coverage}）`)
 }
 
 switch (command) {
@@ -85,6 +90,27 @@ switch (command) {
   case "doctor":
     await doctor()
     break;
+  case "activity": {
+    const sub = Bun.argv[3] ?? 'status'
+    try {
+      if (sub === 'start') await startActivity(DEFAULT_CONFIG)
+      else if (sub === 'stop') stopActivity()
+      else if (sub === 'status') {
+        const s = activityStatus(DEFAULT_CONFIG)
+        console.log(`鼠标采集    ${s.running ? `运行中（pid ${s.pid}）` : '未运行'}`)
+        console.log(`provider    ${s.provider ?? 'none'}`)
+        console.log(`逻辑日      ${s.dayId}`)
+        console.log(`今日点击    ${s.clicks} 次`)
+        console.log(`覆盖状态    ${s.coverage}`)
+      } else {
+        throw new Error(`未知 activity 子命令：${sub}（可用 start、stop、status）`)
+      }
+    } catch (error) {
+      console.error((error as Error).message)
+      process.exitCode = 1
+    }
+    break
+  }
   case "init":
   case "check":
   case "rules":

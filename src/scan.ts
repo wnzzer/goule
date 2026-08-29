@@ -6,6 +6,8 @@ import { computeDebt } from './stress/debt'
 import { evaluateSignals, type DayInput, type Signal } from './stress/signals'
 import { buildActivity, type Activity } from './timeline/activity'
 import type { Block } from './timeline/blocks'
+import { loadMouseActivity } from './mouse/storage'
+import type { MouseProvider } from './mouse/types'
 import { MINUTE_MS, localDate, localParts, type Instant, type Tz } from './types/instant'
 import { dayRange, isWeekend, logicalDay, type DayRange } from './types/day'
 import { resolveTz, type Config } from './types/config'
@@ -123,7 +125,11 @@ export async function scanDay(dayId: string, cfg: Config): Promise<DayFactsLite>
     idleGapMinutes: cfg.idleGapMinutes,
     minBlockCreditSeconds: cfg.minBlockCreditSeconds,
     tz,
-  })
+  }, loadMouseActivity(dayId, cfg.mouse.enabled, cfg.mouse.enabled
+    ? (cfg.mouse.provider === 'auto'
+      ? (process.platform === 'darwin' ? 'macos-cgevent' : process.platform === 'linux' ? 'linux-evdev' : null)
+      : cfg.mouse.provider as MouseProvider)
+    : null))
 
   // 历史逐日 hands_on：用于基线、活跃日集合、前一日末锚点
   const perDay = new Map<string, { minutes: number; last: Instant }>()
