@@ -1,6 +1,6 @@
-import { Glob } from 'bun'
 import { statSync } from 'node:fs'
 import { basename } from 'node:path'
+import { findFiles } from '../runtime/files'
 import type { DayRange } from '../types/day'
 import { diffTokens, emptyTokens, type RawSession, type SessionEvent, type TokenEvent, type TokenUsage } from '../types/session'
 import { firstTimestamp, plausible, readLines } from './jsonl'
@@ -64,8 +64,7 @@ export const codex: SessionAdapter = {
     const out: Candidate[] = []
     // 四层 glob（YYYY/MM/DD/*.jsonl）。不可改用递归：根目录下的
     // history.jsonl / session_index.jsonl 不是 session 文件。
-    const glob = new Glob('*/*/*/*.jsonl')
-    for await (const file of glob.scan({ cwd: root, absolute: true, onlyFiles: true })) {
+    for (const file of await findFiles(root, { extension: '.jsonl', exactDepth: 4 })) {
       let mtimeMs: number
       try { mtimeMs = statSync(file).mtimeMs } catch { continue }
       if (inMtimeWindow(mtimeMs, range)) out.push({ file, mtimeMs })

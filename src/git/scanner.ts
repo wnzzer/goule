@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process'
 import { lstatSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { promisify } from 'node:util'
 import type { DayRange } from '../types/day'
 import type { GitCommit, GitScanResult, RepoDay } from './types'
 
@@ -9,6 +11,8 @@ interface GitCommandResult {
   stderr: string
 }
 
+const execFileAsync = promisify(execFile)
+
 function expandHome(path: string): string {
   if (path === '~') return process.env.HOME ?? path
   if (path.startsWith('~/')) return join(process.env.HOME ?? '~', path.slice(2))
@@ -16,15 +20,20 @@ function expandHome(path: string): string {
 }
 
 async function runGit(repoPath: string, args: string[]): Promise<GitCommandResult> {
-  const proc = Bun.spawn(['git', '-C', repoPath, ...args], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  return { code: await proc.exited, stdout, stderr }
+  try {
+    const { stdout, stderr } = await execFileAsync('git', ['-C', repoPath, ...args], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    })
+    return { code: 0, stdout, stderr }
+  } catch (error) {
+    const result = error as { code?: number; stdout?: string; stderr?: string; message?: string }
+    return {
+      code: typeof result.code === 'number' ? result.code : 1,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? result.message ?? '',
+    }
+  }
 }
 
 function isDirectory(path: string): boolean {

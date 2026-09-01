@@ -1,8 +1,11 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
+import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { Glob } from 'bun'
+import { promisify } from 'node:util'
+import { findFiles } from './runtime/files'
 import { DEFAULT_CONFIG, resolveTz } from './types/config'
 import { logicalDay } from './types/day'
 import { activityStatus, startActivity, stopActivity } from './mouse/service'
@@ -13,16 +16,18 @@ import { renderPdfReport } from './render/pdf'
 import { renderSharePng, renderShareSvg } from './render/share'
 import { startDashboard } from './dashboard'
 
-const command = Bun.argv[2] ?? "dashboard";
+const argv = process.argv
+const command = argv[2] ?? 'dashboard'
+const execFileAsync = promisify(execFile)
 
-const help = `够了·到点下班（Goule）\n\nPhase 1（事实层）：\n  goule report [--date today] [--format md|json|html|pdf|share|svg] [--output path]\n  goule scan   [--date today]     输出原始 DayFacts JSON\n  goule notes  [--date today]     用 $EDITOR 编辑当日笔记\n  goule doctor                    数据源可达性诊断\n  goule activity start|stop|status  鼠标点击活动采集（默认关闭）\n\n导出示例：\n  goule report --format html --output report.html\n  goule report --format pdf --output report.pdf\n  goule report --format share --output goule-share.png\n\nPhase 2（规则引擎，尚未实现）：\n  goule init / check / rules / dashboard\n\n当前版本：项目骨架（Spec-First）\n设计文档：docs/superpowers/specs/2026-08-29-goule-phase1-design.md\n`;
+const help = `够了·到点下班（Goule）\n\n用法：\n  goule dashboard [--date today] [--port 8912] [--no-open]\n  goule report [--date today] [--format md|json|html|pdf|share|svg] [--output path]\n  goule scan [--date today]\n  goule doctor\n  goule activity start|stop|status\n\n示例：\n  goule report --format pdf --output report.pdf\n  goule report --format share --output goule-share.png\n`;
 
 const phase2 = (name: string) =>
   console.error(`\`goule ${name}\` 属于 Phase 2（规则引擎），尚未实现。\n首期只呈现事实，不下结论 —— 试试 \`goule report\`。`);
 
 function argValue(flag: string): string | null {
-  const i = Bun.argv.indexOf(flag)
-  return i >= 0 ? (Bun.argv[i + 1] ?? null) : null
+  const i = argv.indexOf(flag)
+  return i >= 0 ? (argv[i + 1] ?? null) : null
 }
 
 function targetDay(): string {
@@ -38,11 +43,8 @@ function targetDay(): string {
   return raw
 }
 
-async function countJsonl(root: string, pattern: string): Promise<number> {
-  let n = 0
-  const glob = new Glob(pattern)
-  for await (const _ of glob.scan({ cwd: root, absolute: true, onlyFiles: true })) n++
-  return n
+async function countJsonl(root: string, exactDepth?: number): Promise<number> {
+  return (await findFiles(root, { extension: '.jsonl', exactDepth })).length
 }
 
 type ReportFormat = 'md' | 'json' | 'html' | 'pdf' | 'share' | 'svg'
@@ -55,7 +57,7 @@ function defaultReportPath(dayId: string, format: ReportFormat): string {
 async function writeReportOutput(path: string, content: string | Uint8Array): Promise<void> {
   const target = resolve(path)
   mkdirSync(dirname(target), { recursive: true })
-  await Bun.write(target, content)
+  await writeFile(target, content)
   console.error(`已导出：${target}`)
 }
 
@@ -67,15 +69,15 @@ async function doctor(): Promise<void> {
   console.log('')
 
   const rows: Array<[string, string, string]> = []
-  for (const [name, src, pattern] of [
-    ['Claude Code', DEFAULT_CONFIG.sources.claudeCode, '**/*.jsonl'],
-    ['Codex', DEFAULT_CONFIG.sources.codex, '*/*/*/*.jsonl'],
+  for (const [name, src, exactDepth] of [
+    ['Claude Code', DEFAULT_CONFIG.sources.claudeCode, undefined],
+    ['Codex', DEFAULT_CONFIG.sources.codex, 4],
   ] as const) {
     if (!src.enabled) { rows.push([name, '已禁用', src.root]); continue }
     if (!existsSync(src.root)) { rows.push([name, '✗ 目录不存在', src.root]); continue }
     try {
       statSync(src.root)
-      const n = await countJsonl(src.root, pattern)
+      const n = await countJsonl(src.root, exactDepth)
       rows.push([name, `✓ ${n} 个 session 文件`, src.root])
     } catch (e) {
       rows.push([name, `✗ 不可读：${(e as Error).message}`, src.root])
@@ -85,9 +87,12 @@ async function doctor(): Promise<void> {
     console.log(`${name.padEnd(12)}${status.padEnd(26)}${root}`)
   }
   const git = DEFAULT_CONFIG.git
-  const proc = Bun.spawn(['git', '--version'], { stdout: 'pipe', stderr: 'pipe' })
-  const gitVersion = (await new Response(proc.stdout).text()).trim()
-  const gitOk = (await proc.exited) === 0
+  let gitVersion = ''
+  let gitOk = false
+  try {
+    gitVersion = (await execFileAsync('git', ['--version'], { encoding: 'utf8' })).stdout.trim()
+    gitOk = true
+  } catch { /* doctor 会在下方报告 Git 不可用 */ }
   const author = git.author === 'auto' ? '各仓库 user.email' : git.author
   console.log(`${'Git'.padEnd(12)}${(gitOk ? `✓ ${gitVersion}` : '✗ 不可用').padEnd(26)}  作者筛选：${author}`)
   console.log(`${''.padEnd(12)}${'扫描根'.padEnd(24)}  ${git.repos.join(', ') || '（未配置）'}`)
@@ -112,7 +117,7 @@ switch (command) {
         process.exitCode = 1
         break
       }
-      if (Bun.argv.includes('--polish') || Bun.argv.includes('--dry-run')) {
+      if (argv.includes('--polish') || argv.includes('--dry-run')) {
         console.error('polish / dry-run 尚未实现；当前 report 仅输出事实层。')
         process.exitCode = 1
         break
@@ -149,7 +154,7 @@ switch (command) {
     await doctor()
     break;
   case "activity": {
-    const sub = Bun.argv[3] ?? 'status'
+    const sub = argv[3] ?? 'status'
     try {
       if (sub === 'start') await startActivity(DEFAULT_CONFIG)
       else if (sub === 'stop') stopActivity()
@@ -177,7 +182,7 @@ switch (command) {
       process.exitCode = 1
       break
     }
-    await startDashboard(targetDay(), port, !Bun.argv.includes('--no-open'))
+    await startDashboard(targetDay(), port, !argv.includes('--no-open'))
     break
   }
   case "init":

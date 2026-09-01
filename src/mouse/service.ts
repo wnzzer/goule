@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { GOULE_DIR, resolveTz, type Config } from '../types/config'
@@ -29,8 +30,8 @@ function alive(pid: number): boolean {
     process.kill(pid, 0)
     // PID 文件可能在进程退出后残留并被系统复用；只停止明确属于 Goule
     // activity start 的进程，避免误杀其他用户进程。
-    const result = Bun.spawnSync(['ps', '-p', String(pid), '-o', 'command='])
-    const command = result.stdout ? new TextDecoder().decode(result.stdout) : ''
+    const result = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' })
+    const command = result.stdout ?? ''
     return command.includes('activity start')
   } catch {
     return false

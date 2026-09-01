@@ -1,11 +1,12 @@
+import { createReadStream } from 'node:fs'
 import { parseInstant, type Instant } from '../types/instant'
 
 /**
  * 流式逐行读取。单个 session 文件实测可达 466 MB，
- * 绝不可用 Bun.file().text() 整体载入。
+ * 绝不可整体载入。
  */
 export async function* readLines(path: string): AsyncGenerator<string> {
-  const stream = Bun.file(path).stream()
+  const stream = createReadStream(path)
   const decoder = new TextDecoder()
   let buf = ''
   for await (const chunk of stream) {

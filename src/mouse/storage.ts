@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { GOULE_DIR } from '../types/config'
 import { emptyMouseActivity } from './aggregate'
@@ -45,7 +46,7 @@ export async function writeMouseRecordAsync(record: MouseActivityRecord, root = 
   try { chmodSync(dir, 0o700) } catch { /* 权限由宿主文件系统决定 */ }
   const path = mouseActivityPath(record.dayId, root)
   const tmp = `${path}.${process.pid}.tmp`
-  await Bun.write(tmp, JSON.stringify(record, null, 2) + '\n')
+  await writeFile(tmp, JSON.stringify(record, null, 2) + '\n')
   renameSync(tmp, path)
   try { chmodSync(path, 0o600) } catch { /* 权限由宿主文件系统决定 */ }
 }

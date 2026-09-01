@@ -4,22 +4,45 @@
   "description": "够了·到点下班：local-first work verification and daily report tool for developers",
   "type": "module",
   "bin": {
-    "goule": "src/index.ts"
+    "goule": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "assets/icon.png",
+    "native/macos/goule-mouse-helper.swift",
+    "prototypes/dusk-ledger/index.html",
+    "prototypes/dusk-ledger/app.bundle.js",
+    "prototypes/dusk-ledger/styles.css",
+    "prototypes/dusk-ledger/favicon.svg",
+    "prototypes/dusk-ledger/vendor/"
+  ],
   "scripts": {
-    "dev": "bun run src/index.ts",
-    "prototype:serve": "bun run scripts/serve-prototype.ts",
-    "report": "bun run src/index.ts report",
-    "typecheck": "bunx tsc --noEmit",
-    "test": "bun test"
+    "build": "node scripts/build.mjs",
+    "dev": "tsx src/index.ts",
+    "dashboard": "tsx src/index.ts dashboard",
+    "prototype:fixture": "tsx scripts/make-prototype-fixture.ts",
+    "prototype:serve": "tsx scripts/serve-prototype.ts",
+    "report": "tsx src/index.ts report",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check:node": "npm run build && node dist/index.js --help",
+    "prepack": "npm run build"
   },
   "engines": {
-    "bun": ">=1.1.0"
+    "node": ">=20"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/wnzzer/goule.git"
+  },
+  "homepage": "https://github.com/wnzzer/goule#readme",
+  "bugs": {
+    "url": "https://github.com/wnzzer/goule/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
   "keywords": [
     "git",
@@ -30,7 +53,10 @@
   ],
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/node": "^22.0.0",
     "@types/pdfkit": "^0.17.6",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
     "typescript": "latest"
   },
   "dependencies": {

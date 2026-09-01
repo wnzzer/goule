@@ -1,14 +1,14 @@
 import { Resvg } from '@resvg/resvg-js'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dependencyPath } from '../runtime/paths'
 import type { DayFactsLite } from '../scan'
 import { summarizeBusinessChanges } from './business'
 import { gouleIconGroup } from './icon'
 import { dayFactsMouse, escapeXml, formatCompactMinutes, hourMax, hourValues } from './view'
 
 const SHARE_FONT_FILES = [
-  join(import.meta.dir, '../../node_modules/@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff'),
-  join(import.meta.dir, '../../node_modules/@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-700-normal.woff'),
+  dependencyPath('@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff'),
+  dependencyPath('@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-700-normal.woff'),
 ].filter((path) => existsSync(path))
 
 function shorten(value: unknown, max: number): string {

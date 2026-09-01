@@ -1,6 +1,6 @@
 import PDFDocument from 'pdfkit'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dependencyPath, packagePath } from '../runtime/paths'
 import type { DayFactsLite } from '../scan'
 import { summarizeBusinessChanges } from './business'
 import { dayFactsMouse, finite, formatMinutes, hourMax, hourValues, titleForSession } from './view'
@@ -8,7 +8,7 @@ import { dayFactsMouse, finite, formatMinutes, hourMax, hourValues, titleForSess
 const FONT_CANDIDATES = [
   process.env.GOULE_PDF_FONT,
   // Noto Sans SC 只取简体中文 400 子集，避免依赖系统字体导致 PDF 出现方框字。
-  join(import.meta.dir, '../../node_modules/@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff'),
+  dependencyPath('@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff'),
   '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
   '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
   '/Library/Fonts/Arial Unicode.ttf',
@@ -21,7 +21,7 @@ function findFont(): string | null {
   return FONT_CANDIDATES.find((path) => existsSync(path)) ?? null
 }
 
-const ICON_PATH = join(import.meta.dir, '../../assets/icon.png')
+const ICON_PATH = packagePath('assets', 'icon.png')
 
 function textValue(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim()

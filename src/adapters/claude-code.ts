@@ -1,6 +1,6 @@
-import { Glob } from 'bun'
 import { statSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
+import { findFiles } from '../runtime/files'
 import type { DayRange } from '../types/day'
 import type { Instant } from '../types/instant'
 import type { RawSession, SessionEvent, TokenEvent } from '../types/session'
@@ -78,8 +78,7 @@ export const claudeCode: SessionAdapter = {
   async discover(root: string, range: DayRange): Promise<Candidate[]> {
     const out: Candidate[] = []
     // 必须递归：subagent 在 <project>/<uuid>/subagents/agent-*.jsonl，占 45% 的文件
-    const glob = new Glob('**/*.jsonl')
-    for await (const file of glob.scan({ cwd: root, absolute: true, onlyFiles: true })) {
+    for (const file of await findFiles(root, { extension: '.jsonl' })) {
       let mtimeMs: number
       try { mtimeMs = statSync(file).mtimeMs } catch { continue }
       if (inMtimeWindow(mtimeMs, range)) out.push({ file, mtimeMs })

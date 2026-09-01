@@ -1,10 +1,12 @@
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { packagePath } from '../runtime/paths'
 import { GOULE_DIR } from '../types/config'
 import type { MouseClickEvent } from './types'
 
 const HELPER_NAME = 'goule-mouse-helper'
-const HELPER_SOURCE = join(import.meta.dir, '../../native/macos/goule-mouse-helper.swift')
+const HELPER_SOURCE = packagePath('native', 'macos', 'goule-mouse-helper.swift')
 
 function decode(chunk: Uint8Array | string): string {
   return typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk)
@@ -24,18 +26,19 @@ export function ensureMacHelper(): string {
   if (existsSync(binary)) return binary
 
   mkdirSync(binDir, { recursive: true })
-  let result: ReturnType<typeof Bun.spawnSync>
+  let result: ReturnType<typeof spawnSync>
   try {
-    result = Bun.spawnSync([
-      'swiftc', '-swift-version', '5', HELPER_SOURCE, '-o', binary,
+    result = spawnSync('swiftc', [
+      '-swift-version', '5', HELPER_SOURCE, '-o', binary,
       '-framework', 'CoreGraphics', '-framework', 'ApplicationServices',
-    ])
+    ], { encoding: 'utf8' })
   } catch (error) {
     throw new Error(`编译 macOS mouse helper 失败：${(error as Error).message}`)
   }
-  if (result.exitCode !== 0) {
-    const stderr = decode(result.stderr ?? new Uint8Array())
-    throw new Error(`编译 macOS mouse helper 失败：${stderr || `exit ${result.exitCode}`}`)
+  if (result.error) throw new Error(`编译 macOS mouse helper 失败：${result.error.message}`)
+  if (result.status !== 0) {
+    const stderr = decode(result.stderr ?? '')
+    throw new Error(`编译 macOS mouse helper 失败：${stderr || `exit ${result.status}`}`)
   }
   return binary
 }
@@ -51,55 +54,48 @@ export function startMacMouseCollector(
   onClick: (event: MouseClickEvent) => void,
 ): RunningMouseCollector {
   const binary = ensureMacHelper()
-  const child = Bun.spawn([binary], { stdout: 'pipe', stderr: 'pipe' })
-  const stdout = child.stdout
-  const stderr = child.stderr
+  const child = spawn(binary, [], { stdio: ['ignore', 'pipe', 'pipe'] })
   let stderrText = ''
+  let buf = ''
 
-  const stderrDone = (async () => {
-    if (!stderr) return
-    for await (const chunk of stderr) stderrText += decode(chunk as Uint8Array | string)
-  })()
+  const consume = (line: string) => {
+    if (!line.trim()) return
+    try {
+      const value = JSON.parse(line) as { at?: unknown }
+      if (typeof value.at === 'number' && Number.isFinite(value.at)) onClick({ at: value.at })
+    } catch {
+      // helper 输出异常时忽略该行，collector 继续工作
+    }
+  }
 
-  const done = (async () => {
-    let buf = ''
-    if (stdout) {
-      for await (const chunk of stdout) {
-        buf += decode(chunk as Uint8Array | string)
-        let idx = buf.indexOf('\n')
-        while (idx >= 0) {
-          const line = buf.slice(0, idx)
-          buf = buf.slice(idx + 1)
-          if (line.trim()) {
-            try {
-              const value = JSON.parse(line) as { at?: unknown }
-              if (typeof value.at === 'number' && Number.isFinite(value.at)) onClick({ at: value.at })
-            } catch {
-              // helper 输出异常时忽略该行，collector 继续工作
-            }
-          }
-          idx = buf.indexOf('\n')
-        }
-      }
+  child.stdout?.on('data', (chunk: Buffer) => {
+    buf += decode(chunk)
+    let idx = buf.indexOf('\n')
+    while (idx >= 0) {
+      consume(buf.slice(0, idx))
+      buf = buf.slice(idx + 1)
+      idx = buf.indexOf('\n')
     }
-    if (buf.trim()) {
-      try {
-        const value = JSON.parse(buf) as { at?: unknown }
-        if (typeof value.at === 'number' && Number.isFinite(value.at)) onClick({ at: value.at })
-      } catch {
-        // 丢弃不完整尾行
-      }
+  })
+  child.stderr?.on('data', (chunk: Buffer) => { stderrText += decode(chunk) })
+
+  const done = new Promise<{ exitCode: number; stderr: string }>((resolve) => {
+    let settled = false
+    const finish = (exitCode: number, error = '') => {
+      if (settled) return
+      settled = true
+      if (buf.trim()) consume(buf)
+      resolve({ exitCode, stderr: stderrText || error })
     }
-    const exitCode = await child.exited
-    await stderrDone
-    return { exitCode, stderr: stderrText }
-  })()
+    child.once('error', (error) => finish(1, error.message))
+    child.once('close', (code) => finish(code ?? 1))
+  })
 
   return {
     provider: 'macos-cgevent',
     done,
     async stop() {
-      child.kill('SIGTERM')
+      if (child.exitCode === null) child.kill('SIGTERM')
       await done
     },
   }
