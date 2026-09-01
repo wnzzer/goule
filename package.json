@@ -26,6 +26,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "check:node": "npm run build && node dist/index.js --help",
+    "check:public-domains": "node scripts/check-public-domains.mjs",
     "prepack": "npm run build"
   },
   "engines": {

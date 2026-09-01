@@ -22,7 +22,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --registry=https://registry.npmjs.org
+      - run: npm run check:public-domains
       - run: npm run typecheck
       - run: bun test
       - run: npm run build
